@@ -1,0 +1,68 @@
+:root {
+  --screen: #0d0e11;
+  --ink: #e6e4df;
+  --dim: #8b8f96;
+  --faint: #4a4e55;
+  --claude: #d97757;
+  --error: #ff6b6b;
+  --warn: #e5b45a;
+  --mono: "DejaVu Sans Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html,
+body {
+  background: #0d0e11;
+}
+
+.window {
+  width: 860px;
+  padding: 22px 26px 20px;
+  background: var(--screen);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.dim { color: var(--dim); }
+.claude { color: var(--claude); }
+.error { color: var(--error); }
+.warn { color: var(--warn); }
+
+.elbow {
+  display: inline-block;
+  width: 1ch;
+  vertical-align: bottom;
+}
+
+.prompt {
+  margin-top: 14px;
+  padding: 3px 0;
+  border-top: 1px solid var(--faint);
+  border-bottom: 1px solid var(--faint);
+  color: var(--dim);
+}
+
+.cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.15em;
+  vertical-align: text-bottom;
+  background: var(--ink);
+}
+
+.footer {
+  margin-top: 3px;
+  padding-left: 2ch;
+  color: var(--warn);
+}
+
+.footer .dim {
+  color: var(--dim);
+}

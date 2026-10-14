@@ -1,0 +1,113 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="size" content="860x520">
+<style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+body {
+  position: relative;
+  width: 860px;
+  height: 520px;
+  overflow: hidden;
+  background: #e9e6df;
+}
+
+.stage {
+  position: absolute;
+  left: 50%;
+  top: 120px;
+  width: 760px;
+  height: 560px;
+  margin-left: -380px;
+  transform: perspective(1100px) rotateX(48deg);
+  transform-origin: 50% 0;
+}
+
+.terminal {
+  width: 100%;
+  height: 100%;
+  padding: 26px 34px;
+  border: 12px solid #2a2c31;
+  border-radius: 16px;
+  background: #0d0e11;
+  color: #e6e4df;
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 19px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.claude { color: #d97757; }
+.error { color: #ff6b6b; }
+.dim { color: #8b8f96; }
+.warn { color: #e5b45a; }
+
+.prompt {
+  margin-top: 14px;
+  padding: 4px 0;
+  border-top: 2px solid #4a4e55;
+  border-bottom: 2px solid #4a4e55;
+  color: #8b8f96;
+}
+
+svg {
+  position: absolute;
+  inset: 0;
+}
+</style></head><body>
+<div class="stage"><div class="terminal"><span class="claude">●</span> Moving the span into Token, keyword branch first
+<span class="error">  ⎿  API Error: Connection lost mid-response.</span>
+<span class="claude">✻ Waiting for API response · will retry in 2m 29s</span>
+<span class="error">  ⎿  API Error: 529 Overloaded.</span>
+<span class="error">  ⎿  API Error: Connection refused (ECONNREFUSED)</span>
+<span class="error">  ⎿  API Error: Stream idle timeout</span>
+<span class="warn">⚠ You've hit your session limit · resets 6:40pm</span>
+<span class="error">  ⎿  API Error: 529 Overloaded.</span>
+
+<span class="dim">✻ Worked for 10m 02s</span>
+<div class="prompt">❯ </div><span class="warn">  ⏵⏵ auto mode on</span></div></div>
+<svg viewBox="0 0 860 520" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <g id="dev">
+      <path d="M244 262 C 236 300, 226 340, 220 382"/>
+      <path d="M220 382 L 196 470 L 176 474"/>
+      <path d="M220 382 L 250 468 L 272 470"/>
+      <path d="M236 300 L 270 334 L 252 372"/>
+      <path d="M234 306 L 204 346 L 214 380"/>
+    </g>
+    <g id="vomit-blob">
+      <path d="M296 244
+               C 340 226, 392 236, 420 268
+               C 444 296, 452 318, 456 336
+               L 482 336
+               C 476 306, 462 276, 436 250
+               C 400 214, 344 208, 300 226 Z"/>
+      <path d="M392 342 C 410 322, 470 318, 520 326 C 566 334, 580 352, 548 362 C 510 374, 430 372, 400 362 C 384 356, 382 350, 392 342 Z"/>
+    </g>
+  </defs>
+  <ellipse cx="226" cy="476" rx="66" ry="12" fill="rgba(0,0,0,0.35)"/>
+  <use href="#dev" stroke="#ffffff" stroke-width="13"/>
+  <use href="#dev" stroke="#111111" stroke-width="5"/>
+  <use href="#vomit-blob" fill="#9acd32" stroke="#ffffff" stroke-width="8"/>
+  <use href="#vomit-blob" fill="#9acd32" stroke="#4f7a12" stroke-width="3"/>
+  <g fill="#c4e86a" stroke="#4f7a12" stroke-width="2.5">
+    <circle cx="428" cy="350" r="7"/>
+    <circle cx="506" cy="340" r="9"/>
+    <circle cx="546" cy="352" r="6"/>
+    <circle cx="470" cy="356" r="5"/>
+    <circle cx="396" cy="258" r="5"/>
+    <circle cx="438" cy="292" r="4"/>
+    <circle cx="590" cy="344" r="6"/>
+    <circle cx="372" cy="366" r="5"/>
+  </g>
+  <circle cx="262" cy="230" r="40" fill="#fff" stroke="#111" stroke-width="5"/>
+  <g stroke="#111" stroke-width="4">
+    <path d="M250 214 l11 8 M250 222 l11 -8"/>
+    <path d="M274 210 l11 8 M274 218 l11 -8"/>
+    <path d="M222 196 q-14 -10 -8 -26 M236 190 q-4 -14 6 -24" stroke-width="3"/>
+  </g>
+  <ellipse cx="292" cy="246" rx="11" ry="9" fill="#111"/>
+</svg>
+</body></html>

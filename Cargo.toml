@@ -1,0 +1,26 @@
+[package]
+name = "claude-nonstop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Keeps Claude Code sessions running through network retries, cut-off turns, overloads and usage limits"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Darkwing4/claude-nonstop"
+readme = "README.md"
+keywords = ["claude-code", "tmux", "zellij", "retry"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [".github/", "docs/", "install.sh", "samples/"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml_edit = { version = "0.25", features = ["serde"] }
+regex = "1"
+jiff = "0.2"
+rustix = { version = "1", features = ["fs", "process", "event", "time", "pipe"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

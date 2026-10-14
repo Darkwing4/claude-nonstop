@@ -52,9 +52,17 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag dist/*
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: check whether this version is on crates.io
+        id: crate
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' -A "claude-nonstop-release" "https://crates.io/api/v1/crates/claude-nonstop/${GITHUB_REF_NAME#v}")
+          echo "published=$([ "$status" = 200 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.crate.outputs.published == 'false'
       - uses: rust-lang/crates-io-auth-action@v1
+        if: steps.crate.outputs.published == 'false'
         id: auth
       - run: cargo publish --locked
+        if: steps.crate.outputs.published == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

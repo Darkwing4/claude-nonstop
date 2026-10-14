@@ -31,7 +31,7 @@ No wrapper, no polling: the StopFailure hook plus [`CLAUDE_CODE_MAX_RETRIES`](ht
     curl -fsSL https://raw.githubusercontent.com/Darkwing4/claude-nonstop/main/install.sh | sh
     claude-nonstop install
 
-`install` adds the StopFailure hook and `CLAUDE_CODE_MAX_RETRIES=1` to the `env` of `~/.claude/settings.json`; pick another count with `--max-retries N` (0 to 15). Run `claude` as usual. Also available as `cargo install claude-nonstop`. Add `--daemon` to `install` for a systemd user unit or launchd agent that keeps waits alive across closed panes and reboots.
+`install` adds the StopFailure hook and `CLAUDE_CODE_MAX_RETRIES=1` to the `env` of `~/.claude/settings.json`; pick another count with `--max-retries N` (0 to 15). Run `claude` as usual. Also available as `cargo install claude-nonstop`. Add `--daemon` to `install` for a systemd user unit that keeps waits alive across closed panes and reboots.
 
 ## Compared with
 
@@ -53,14 +53,14 @@ No wrapper, no polling: the StopFailure hook plus [`CLAUDE_CODE_MAX_RETRIES`](ht
 
 ## Configuration
 
-`~/.config/claude-nonstop/config.toml`; `claude-nonstop config list` prints every key with its default and source. Any key can be overridden with `CLAUDE_NONSTOP_<SECTION>_<KEY>`. Notifications go through notify-send or osascript, terminal OSC and bell for tmux clients, plus ntfy when a topic is set.
+`~/.config/claude-nonstop/config.toml`; `claude-nonstop config list` prints every key with its default and source. Any key can be overridden with `CLAUDE_NONSTOP_<SECTION>_<KEY>`. Notifications go through notify-send, terminal OSC and bell for tmux clients, plus ntfy when a topic is set.
 
 ## Limitations
 
 - Depends on StopFailure hook payload fields and the transcript format. Tested with Claude Code 2.1.287; `doctor` warns on newer versions.
 - `CLAUDE_CODE_MAX_RETRIES` also applies to subagents. A subagent that gives up does not fire StopFailure; the main agent sees a failed tool call and decides what to do.
 - It types into your terminal. It never types over a running turn, over text you are entering, or into a pane that no longer runs Claude Code, and it never presses Enter on a menu it cannot read.
-- Linux and macOS.
+- Linux only.
 
 ## License
 

@@ -54,14 +54,9 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
     records.sort_by_key(|record| (!record.is_open(), record.reset_at));
     for record in records {
         let name = record
-            .name
-            .clone()
-            .or_else(|| {
-                record
-                    .session_id
-                    .as_ref()
-                    .map(|id| id.chars().take(8).collect())
-            })
+            .session_id
+            .as_ref()
+            .map(|id| id.chars().take(8).collect())
             .unwrap_or_else(|| record.key.clone());
         out.push_str(&format!(
             "\n  [{:<9}] {name}  {} {}  {}\n",
@@ -141,7 +136,6 @@ pub fn resume_now(paths: &Paths, target: &Target) -> Result<usize> {
             record.status = Status::Stopped;
             record.reset_at = now;
             record.reset_source = ledger::ResetSource::Manual;
-            record.manual = true;
             record.last_error = None;
             count += 1;
         }
@@ -218,6 +212,5 @@ fn limit_label(record: &SessionRecord) -> &'static str {
             ledger::LimitType::Unknown => "limit",
         },
         ledger::StopKind::Overload => "overload",
-        ledger::StopKind::StreamCut => "cut off",
     }
 }

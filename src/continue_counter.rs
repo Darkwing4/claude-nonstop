@@ -19,7 +19,6 @@ static SESSION_ID: LazyLock<Regex> =
 pub struct CounterState {
     pub count: u32,
     pub offset: u64,
-    pub at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,11 +85,7 @@ pub fn record(paths: &Paths, session_id: &str, transcript: &Path, count: u32) ->
     let offset = std::fs::metadata(transcript)
         .map(|meta| meta.len())
         .map_err(|source| Error::io(transcript, "stat", source))?;
-    let state = CounterState {
-        count,
-        offset,
-        at: now_unix(),
-    };
+    let state = CounterState { count, offset };
     let bytes = serde_json::to_vec(&state).map_err(|source| Error::Json {
         path: target.clone(),
         source,

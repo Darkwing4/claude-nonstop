@@ -230,7 +230,6 @@ fn launch(
                 {
                     current.sent_at = Some(now_unix());
                     current.pane = Some(pane.clone());
-                    current.mux_session = Some(reopen::RESUME_SESSION.to_owned());
                 }
             })?;
             verify_at.insert(
@@ -259,10 +258,10 @@ fn start_session(paths: &Paths, config: &Config, item: &QueuedPrompt) -> Result<
                     argv.push(OsString::from(&item.prompt));
                 }
             }
-            reopen::spawn_detached_headless(paths, &item.id, &item.cwd, argv, &[])
+            reopen::spawn_detached_headless(paths, &item.id, &item.cwd, argv)
         }
         reopen::Where::Tmux | reopen::Where::Zellij => {
-            let pane = reopen::open_in(target, &item.cwd, &argv, &[])?;
+            let pane = reopen::open_in(target, &item.cwd, &argv)?;
             let driver = mux::for_pane(&pane);
             let agent = agent::by_id(item.agent);
             reopen::wait_for_prompt(driver.as_ref(), &pane, agent.prompt_glyph())?;

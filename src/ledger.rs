@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic_file;
 use crate::error::{Error, Result};
-pub use crate::mux::PaneAddress;
+use crate::mux::PaneAddress;
 use crate::paths::Paths;
 
 pub const VERSION: u32 = 1;
@@ -23,15 +23,17 @@ pub struct Ledger {
     pub prompts: Vec<QueuedPrompt>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentId {
+    #[default]
     Claude,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    #[default]
     Stopped,
     Resuming,
     Resumed,
@@ -39,34 +41,36 @@ pub enum Status {
     Cancelled,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StopKind {
-    StreamCut,
     Overload,
+    #[default]
     UsageLimit,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LimitType {
     FiveHour,
     Weekly,
     Model,
+    #[default]
     Unknown,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DetectedVia {
+    #[default]
     Hook,
     Transcript,
-    Screen,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum ResetSource {
+    #[default]
     Fallback,
     Relative,
     Absolute,
@@ -78,19 +82,16 @@ pub enum ResetSource {
 pub enum ResumedBy {
     Nonstop,
     Native,
-    User,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SessionRecord {
     pub key: String,
     pub agent: AgentId,
     pub session_id: Option<String>,
     pub cwd: PathBuf,
-    pub name: Option<String>,
     pub pane: Option<PaneAddress>,
-    pub mux_session: Option<String>,
     pub status: Status,
     pub stop: StopKind,
     pub limit: LimitType,
@@ -106,39 +107,6 @@ pub struct SessionRecord {
     pub resume_episode_at: Option<u64>,
     pub resumed_by: Option<ResumedBy>,
     pub resume_message: Option<String>,
-    pub manual: bool,
-    pub env: BTreeMap<String, String>,
-}
-
-impl Default for SessionRecord {
-    fn default() -> Self {
-        SessionRecord {
-            key: String::new(),
-            agent: AgentId::Claude,
-            session_id: None,
-            cwd: PathBuf::new(),
-            name: None,
-            pane: None,
-            mux_session: None,
-            status: Status::Stopped,
-            stop: StopKind::UsageLimit,
-            limit: LimitType::Unknown,
-            detected_via: DetectedVia::Hook,
-            detected_at: 0,
-            banner_at: None,
-            reset_at: 0,
-            reset_source: ResetSource::Fallback,
-            attempts: 0,
-            probe_count: 0,
-            last_attempt_at: None,
-            last_error: None,
-            resume_episode_at: None,
-            resumed_by: None,
-            resume_message: None,
-            manual: false,
-            env: BTreeMap::new(),
-        }
-    }
 }
 
 impl SessionRecord {
@@ -151,17 +119,19 @@ impl SessionRecord {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PromptWhen {
+    #[default]
     NextReset,
     At,
     Now,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptStatus {
+    #[default]
     Pending,
     Launching,
     Delivered,
@@ -169,7 +139,7 @@ pub enum PromptStatus {
     Cancelled,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct QueuedPrompt {
     pub id: String,
@@ -186,31 +156,7 @@ pub struct QueuedPrompt {
     pub sent_at: Option<u64>,
     pub delivered_at: Option<u64>,
     pub pane: Option<PaneAddress>,
-    pub mux_session: Option<String>,
     pub last_error: Option<String>,
-}
-
-impl Default for QueuedPrompt {
-    fn default() -> Self {
-        QueuedPrompt {
-            id: String::new(),
-            agent: AgentId::Claude,
-            cwd: PathBuf::new(),
-            prompt: String::new(),
-            when: PromptWhen::NextReset,
-            at: None,
-            status: PromptStatus::Pending,
-            attempts: 0,
-            not_before: None,
-            created_at: 0,
-            launched_at: None,
-            sent_at: None,
-            delivered_at: None,
-            pane: None,
-            mux_session: None,
-            last_error: None,
-        }
-    }
 }
 
 pub fn now_unix() -> u64 {
@@ -301,7 +247,6 @@ pub fn cas(
     paths: &Paths,
     key: &str,
     expect: &[Status],
-    episode_at: Option<u64>,
     change: impl FnOnce(&mut SessionRecord),
 ) -> Result<bool> {
     update(paths, |ledger| {
@@ -309,9 +254,6 @@ pub fn cas(
             return false;
         };
         if !expect.contains(&record.status) {
-            return false;
-        }
-        if episode_at.is_some_and(|expected| expected != record.episode_at()) {
             return false;
         }
         change(record);
@@ -383,24 +325,21 @@ mod tests {
     }
 
     #[test]
-    fn cas_rejects_wrong_status_or_episode() {
+    fn cas_rejects_wrong_status_or_missing_record() {
         let paths = paths_in("cas");
         update(&paths, |ledger| {
             ledger.sessions.insert(
                 "s1".to_owned(),
                 SessionRecord {
                     key: "s1".to_owned(),
-                    detected_at: 10,
-                    banner_at: Some(20),
                     ..SessionRecord::default()
                 },
             );
         })
         .unwrap();
-        assert!(!cas(&paths, "s1", &[Status::Resuming], None, |_| {}).unwrap());
-        assert!(!cas(&paths, "s1", &[Status::Stopped], Some(10), |_| {}).unwrap());
+        assert!(!cas(&paths, "s1", &[Status::Resuming], |_| {}).unwrap());
         assert!(
-            cas(&paths, "s1", &[Status::Stopped], Some(20), |record| {
+            cas(&paths, "s1", &[Status::Stopped], |record| {
                 record.status = Status::Resuming
             })
             .unwrap()
@@ -409,7 +348,7 @@ mod tests {
             read(&paths).unwrap().sessions["s1"].status,
             Status::Resuming
         );
-        assert!(!cas(&paths, "missing", &[Status::Stopped], None, |_| {}).unwrap());
+        assert!(!cas(&paths, "missing", &[Status::Stopped], |_| {}).unwrap());
         std::fs::remove_dir_all(&paths.state).unwrap();
     }
 

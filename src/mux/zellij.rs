@@ -124,7 +124,6 @@ impl Zellij {
         session: &str,
         cwd: &std::path::Path,
         argv: &[std::ffi::OsString],
-        env: &[(String, String)],
     ) -> Result<PaneAddress> {
         if !Self::session_exists(session)? {
             let mut command = Command::new("zellij");
@@ -165,9 +164,6 @@ impl Zellij {
             .arg(cwd)
             .arg("--")
             .arg("/usr/bin/env");
-        for (name, value) in env {
-            command.arg(format!("{name}={value}"));
-        }
         command.args(argv);
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("ZELLIJ") {
@@ -243,9 +239,8 @@ impl Multiplexer for Zellij {
         session: &str,
         cwd: &std::path::Path,
         argv: &[std::ffi::OsString],
-        env: &[(String, String)],
     ) -> Result<PaneAddress> {
-        Zellij::open_window_in(session, cwd, argv, env)
+        Zellij::open_window_in(session, cwd, argv)
     }
 }
 

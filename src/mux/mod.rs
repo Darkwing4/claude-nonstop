@@ -74,7 +74,6 @@ pub trait Multiplexer {
         session: &str,
         _cwd: &std::path::Path,
         _argv: &[std::ffi::OsString],
-        _env: &[(String, String)],
     ) -> Result<PaneAddress> {
         Err(crate::error::Error::Invalid(format!(
             "cannot open a window in {session} with this driver"

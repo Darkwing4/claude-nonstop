@@ -220,7 +220,7 @@ fn dispatch(
             &format!("{name}: {} attempts, still limited", record.attempts),
             true,
         );
-        ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+        ledger::cas(paths, &key, &[Status::Stopped], |current| {
             current.status = Status::Failed;
             current.last_error = Some(format!("{} attempts without progress", current.attempts));
         })?;
@@ -256,7 +256,7 @@ fn dispatch(
     match typing.submit(&message) {
         Ok(()) => {
             let attempts = record.attempts + 1;
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Resuming;
                 current.attempts = attempts;
                 current.last_attempt_at = Some(now);
@@ -273,7 +273,7 @@ fn dispatch(
         }
         Err(error) => {
             let retry_at = now + backoff(record.attempts + 1);
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.attempts += 1;
                 current.last_attempt_at = Some(now);
                 current.last_error = Some(error.to_string());
@@ -302,7 +302,6 @@ fn postpone(
         paths,
         &record.key,
         &[Status::Stopped, Status::Resuming],
-        None,
         |current| {
             current.attempts += 1;
             current.reset_at = retry_at;
@@ -347,7 +346,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
             ),
             true,
         );
-        ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+        ledger::cas(paths, &key, &[Status::Stopped], |current| {
             current.status = Status::Failed;
         })?;
         log::line(
@@ -365,7 +364,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
         _ => None,
     };
     let Some(pane) = live_pane else {
-        ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+        ledger::cas(paths, &key, &[Status::Stopped], |current| {
             current.status = Status::Cancelled;
             current.last_error = Some("pane is gone".to_owned());
         })?;
@@ -385,7 +384,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
         .clone();
     match typing.submit(&message) {
         Ok(()) => {
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Resumed;
                 current.resumed_by = Some(ResumedBy::Nonstop);
                 current.attempts += 1;
@@ -413,7 +412,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
                 overload_ladder::jitter_unit(),
             );
             let retry_at = now + wait.as_secs().max(1);
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.reset_at = retry_at;
                 current.last_error = Some(error.to_string());
             })?;
@@ -446,7 +445,7 @@ fn reopen_session(
                 &format!("{name}: limit reset, but the session runs outside a terminal pane"),
                 true,
             );
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Failed;
                 current.last_error = Some("running outside a pane, cannot type".to_owned());
             })?;
@@ -466,7 +465,7 @@ fn reopen_session(
                 &format!("{name}: limit reset, but its pane is unknown to claude-nonstop"),
                 true,
             );
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Failed;
                 current.last_error = Some(format!(
                     "session still runs as pid {} in an unknown pane",
@@ -488,7 +487,7 @@ fn reopen_session(
     match crate::reopen::reopen(paths, config, record, &prompt) {
         Ok(pane) => {
             let attempts = record.attempts + 1;
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Resuming;
                 current.pane = Some(pane.clone());
                 current.attempts = attempts;
@@ -513,7 +512,7 @@ fn reopen_session(
         }
         Err(error) => {
             let retry_at = now + backoff(record.attempts + 1);
-            ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+            ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.attempts += 1;
                 current.last_attempt_at = Some(now);
                 current.last_error = Some(error.to_string());
@@ -560,7 +559,7 @@ fn verify(
                 let retry_at = recover::resolve_limit(config, &latest)
                     .0
                     .max(now_unix() + backoff(record.attempts));
-                ledger::cas(paths, &key, &[Status::Resuming], None, |current| {
+                ledger::cas(paths, &key, &[Status::Resuming], |current| {
                     current.status = Status::Stopped;
                     current.reset_at = retry_at;
                     current.banner_at = Some(latest.at);
@@ -596,7 +595,7 @@ fn probe(
         {
             let (at, source) = recover::resolve_limit(config, &latest);
             if source != ResetSource::Fallback {
-                ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+                ledger::cas(paths, &key, &[Status::Stopped], |current| {
                     current.reset_at = at;
                     current.reset_source = source;
                     current.banner_at = Some(latest.at);
@@ -613,7 +612,7 @@ fn probe(
     let step = config.limit.probe_minutes
         [(record.probe_count as usize).min(config.limit.probe_minutes.len() - 1)];
     let next = now_unix() + u64::from(step) * 60;
-    ledger::cas(paths, &key, &[Status::Stopped], None, |current| {
+    ledger::cas(paths, &key, &[Status::Stopped], |current| {
         current.probe_count += 1;
         current.reset_at = next;
     })?;
@@ -634,7 +633,6 @@ fn finish(paths: &Paths, key: &str, by: ResumedBy) -> Result<()> {
         paths,
         key,
         &[Status::Stopped, Status::Resuming],
-        None,
         |current| {
             current.status = Status::Resumed;
             current.resumed_by = Some(by);

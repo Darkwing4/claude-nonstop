@@ -90,9 +90,8 @@ impl Multiplexer for Tmux {
         session: &str,
         cwd: &std::path::Path,
         argv: &[std::ffi::OsString],
-        env: &[(String, String)],
     ) -> Result<PaneAddress> {
-        Tmux::open_window_in(session, cwd, argv, env)
+        Tmux::open_window_in(session, cwd, argv)
     }
 }
 
@@ -101,7 +100,6 @@ impl Tmux {
         session: &str,
         cwd: &std::path::Path,
         argv: &[std::ffi::OsString],
-        env: &[(String, String)],
     ) -> Result<PaneAddress> {
         let cwd_text = cwd.display().to_string();
         let has_session = Self::run(&["has-session", "-t", session]).is_ok();
@@ -129,10 +127,6 @@ impl Tmux {
                 "#{pane_id}".into(),
             ]
         };
-        for (name, value) in env {
-            args.push("-e".into());
-            args.push(format!("{name}={value}"));
-        }
         args.push("--".into());
         for arg in argv {
             args.push(arg.to_string_lossy().into_owned());

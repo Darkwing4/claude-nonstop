@@ -51,11 +51,6 @@ pub fn reopen(
     let session = record.session_id.as_deref();
     let settings = crate::recover::settings_for(config, record.agent);
     let mut argv = launch_argv(record.agent, session, &settings.resume_args);
-    let env: Vec<(String, String)> = record
-        .env
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
     match target {
         Where::Headless => {
             argv.push(OsString::from(prompt));
@@ -63,10 +58,10 @@ pub fn reopen(
                 .session_id
                 .clone()
                 .unwrap_or_else(|| record.key.clone());
-            spawn_detached_headless(paths, &name, &record.cwd, argv, &env)
+            spawn_detached_headless(paths, &name, &record.cwd, argv)
         }
         Where::Tmux | Where::Zellij => {
-            let pane = open_in(target, &record.cwd, &argv, &env)?;
+            let pane = open_in(target, &record.cwd, &argv)?;
             let driver = mux::for_pane(&pane);
             let agent = agent::by_id(record.agent);
             wait_for_prompt(driver.as_ref(), &pane, agent.prompt_glyph())?;
@@ -98,15 +93,10 @@ pub fn launch_argv(
     argv
 }
 
-pub fn open_in(
-    target: Where,
-    cwd: &std::path::Path,
-    argv: &[OsString],
-    env: &[(String, String)],
-) -> Result<PaneAddress> {
+pub fn open_in(target: Where, cwd: &std::path::Path, argv: &[OsString]) -> Result<PaneAddress> {
     match target {
-        Where::Tmux => mux::tmux::Tmux.open_window(RESUME_SESSION, cwd, argv, env),
-        Where::Zellij => mux::zellij::Zellij.open_window(RESUME_SESSION, cwd, argv, env),
+        Where::Tmux => mux::tmux::Tmux.open_window(RESUME_SESSION, cwd, argv),
+        Where::Zellij => mux::zellij::Zellij.open_window(RESUME_SESSION, cwd, argv),
         Where::Headless => Err(Error::Invalid(
             "headless launches do not open windows".to_owned(),
         )),
@@ -118,7 +108,6 @@ pub fn spawn_detached_headless(
     name: &str,
     cwd: &std::path::Path,
     argv: Vec<OsString>,
-    env: &[(String, String)],
 ) -> Result<PaneAddress> {
     let log_path = paths.headless_dir().join(format!("{name}.log"));
     let out = OpenOptions::new()
@@ -143,9 +132,6 @@ pub fn spawn_detached_headless(
         if text.starts_with("ZELLIJ") || text.starts_with("TMUX") {
             command.env_remove(env_name);
         }
-    }
-    for (env_name, value) in env {
-        command.env(env_name, value);
     }
     let child =
         spawn_detached(&mut command).map_err(|source| Error::io(program, "spawn", source))?;

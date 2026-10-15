@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- `notify.channel` and notifications over terminal OSC and bell: they were never delivered. An existing `notify.channel` setting is ignored.
+
 ### Fixed
 
 - `general.auto_resume = false` is no longer ignored: once a usage limit resets, the session waits for `resume-now` instead of being resumed.

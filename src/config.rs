@@ -18,6 +18,7 @@ const NON_CONFIG_ENV: &[&str] = &[
     "VERSION",
     "DEBUG",
 ];
+const RETIRED_KEYS: &[(&str, &str)] = &[("notify", "channel")];
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -94,20 +95,10 @@ pub struct Limit {
 #[serde(default, deny_unknown_fields)]
 pub struct Notify {
     pub enabled: bool,
-    pub channel: NotifyChannel,
     pub ntfy_topic: String,
     pub ntfy_server: String,
     pub ntfy_token: String,
     pub ntfy_privacy: NtfyPrivacy,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum NotifyChannel {
-    Auto,
-    Native,
-    Osc,
-    Bell,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -205,7 +196,6 @@ impl Default for Notify {
     fn default() -> Self {
         Notify {
             enabled: true,
-            channel: NotifyChannel::Auto,
             ntfy_topic: String::new(),
             ntfy_server: "https://ntfy.sh".to_owned(),
             ntfy_token: String::new(),
@@ -241,7 +231,8 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
         .into_iter()
         .map(|key| (key, ValueSource::Default))
         .collect();
-    if let Some(file_doc) = read_document(&paths.config_file)? {
+    if let Some(mut file_doc) = read_document(&paths.config_file)? {
+        remove_retired_keys(&mut file_doc);
         for key in flat_keys(file_doc.as_table(), "") {
             if !sources.contains_key(&key) {
                 return Err(Error::Toml {
@@ -260,7 +251,7 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
     }
     for (name, raw) in env_vars {
         let suffix = &name[ENV_PREFIX.len()..];
-        if NON_CONFIG_ENV.contains(&suffix) {
+        if NON_CONFIG_ENV.contains(&suffix) || is_retired_env(suffix) {
             continue;
         }
 
@@ -293,6 +284,7 @@ pub fn set(paths: &Paths, key: &str, raw: &str) -> Result<()> {
     let value = parse_env_value(raw, template)
         .map_err(|detail| Error::Invalid(format!("{key}: {detail}")))?;
     let mut doc = read_document(&paths.config_file)?.unwrap_or_default();
+    remove_retired_keys(&mut doc);
     set_value(doc.as_table_mut(), key, value);
     let candidate: Config = toml_edit::de::from_document(doc.clone())
         .map_err(|error| Error::Invalid(format!("{key}: {error}")))?;
@@ -415,6 +407,20 @@ fn read_document(path: &Path) -> Result<Option<DocumentMut>> {
         detail: error.to_string(),
     })?;
     Ok(Some(doc))
+}
+
+fn remove_retired_keys(doc: &mut DocumentMut) {
+    for (section, name) in RETIRED_KEYS {
+        if let Some(table) = doc.get_mut(section).and_then(Item::as_table_like_mut) {
+            table.remove(name);
+        }
+    }
+}
+
+fn is_retired_env(suffix: &str) -> bool {
+    RETIRED_KEYS
+        .iter()
+        .any(|(section, name)| env_name(&format!("{section}.{name}")) == suffix)
 }
 
 fn defaults_document() -> Result<DocumentMut> {
@@ -598,7 +604,7 @@ mod tests {
         let paths = paths_in(&dir);
         std::fs::write(
             &paths.config_file,
-            "[cutoff]\nmax_in_a_row = 4\n\n[notify]\nchannel = \"bell\"\n",
+            "[cutoff]\nmax_in_a_row = 4\n\n[notify]\nntfy_privacy = \"terse\"\n",
         )
         .unwrap();
         let env = vec![
@@ -614,10 +620,10 @@ mod tests {
         ];
         let loaded = load_from(&paths, &env).unwrap();
         assert_eq!(loaded.config.cutoff.max_in_a_row, 7);
-        assert_eq!(loaded.config.notify.channel, NotifyChannel::Bell);
+        assert_eq!(loaded.config.notify.ntfy_privacy, NtfyPrivacy::Terse);
         assert_eq!(loaded.config.overload.backoff_seconds, vec![10, 20]);
         assert_eq!(loaded.sources["cutoff.max_in_a_row"], ValueSource::Env);
-        assert_eq!(loaded.sources["notify.channel"], ValueSource::File);
+        assert_eq!(loaded.sources["notify.ntfy_privacy"], ValueSource::File);
         assert_eq!(loaded.sources["limit.margin_seconds"], ValueSource::Default);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -670,23 +676,38 @@ mod tests {
             "# my notes\n[general]\nauto_resume = true\n",
         )
         .unwrap();
-        set(&paths, "notify.channel", "osc").unwrap();
+        set(&paths, "notify.ntfy_privacy", "terse").unwrap();
         set(&paths, "agents.claude.enabled", "off").unwrap();
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.starts_with("# my notes\n"), "{text}");
-        assert!(text.contains("channel = \"osc\""), "{text}");
+        assert!(text.contains("ntfy_privacy = \"terse\""), "{text}");
         assert!(text.contains("[agents.claude]"), "{text}");
         let loaded = load_from(&paths, &[]).unwrap();
-        assert_eq!(loaded.config.notify.channel, NotifyChannel::Osc);
+        assert_eq!(loaded.config.notify.ntfy_privacy, NtfyPrivacy::Terse);
         assert!(!loaded.config.agents.claude.enabled);
         let error = set(&paths, "agents.claude.overload_message", "please retry now").unwrap_err();
         assert!(error.to_string().contains("retry"), "{error}");
         assert!(
-            set(&paths, "notify.channel", "loud")
+            set(&paths, "notify.ntfy_privacy", "loud")
                 .unwrap_err()
                 .to_string()
-                .contains("channel")
+                .contains("ntfy_privacy")
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn retired_keys_from_older_releases_are_ignored_and_dropped_on_set() {
+        let dir = tempdir("retired");
+        let paths = paths_in(&dir);
+        std::fs::write(&paths.config_file, "[notify]\nchannel = \"bell\"\n").unwrap();
+        let env = vec![("CLAUDE_NONSTOP_NOTIFY_CHANNEL".to_owned(), "osc".to_owned())];
+        let loaded = load_from(&paths, &env).unwrap();
+        assert!(!loaded.sources.contains_key("notify.channel"));
+        set(&paths, "notify.enabled", "off").unwrap();
+        let text = std::fs::read_to_string(&paths.config_file).unwrap();
+        assert!(!text.contains("channel"), "{text}");
+        assert!(!load_from(&paths, &[]).unwrap().config.notify.enabled);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

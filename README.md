@@ -48,12 +48,12 @@ No wrapper, no polling: the StopFailure hook plus [`CLAUDE_CODE_MAX_RETRIES`](ht
     claude-nonstop status | logs -f
     claude-nonstop resume-now ID | cancel ID | message ID "text"
     claude-nonstop prompt add --at 7pm "run the tests" | prompt list
-    claude-nonstop config list | config set notify.channel bell
+    claude-nonstop config list | config set notify.ntfy_topic alerts
     claude-nonstop doctor --fix | install --daemon --max-retries 2 | uninstall --purge
 
 ## Configuration
 
-`~/.config/claude-nonstop/config.toml`; `claude-nonstop config list` prints every key with its default and source. Any key can be overridden with `CLAUDE_NONSTOP_<SECTION>_<KEY>`. Notifications go through notify-send, terminal OSC and bell for tmux clients, plus ntfy when a topic is set.
+`~/.config/claude-nonstop/config.toml`; `claude-nonstop config list` prints every key with its default and source. Any key can be overridden with `CLAUDE_NONSTOP_<SECTION>_<KEY>`. Notifications go through notify-send, plus ntfy when a topic is set.
 
 ## Limitations
 

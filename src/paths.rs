@@ -74,9 +74,6 @@ impl Paths {
 
 pub fn create_private_dir(dir: &Path) -> Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    if dir.is_dir() {
-        return Ok(());
-    }
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)

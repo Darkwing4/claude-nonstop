@@ -1,23 +1,31 @@
-use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use super::zellij_client::ZellijClient;
-use super::{COLUMNS, Driver, Key, ListedPane, Multiplexer, Pane, ROWS, command, run, run_checked};
+use super::zellij_pane_feed::PaneFeed;
+use super::{COLUMNS, Driver, Finished, Key, ListedPane, Multiplexer, Pane, ROWS, command, run};
 use crate::events::Waiter;
 
 const SESSION: &str = "e2e";
 const CONFIG: &str = "pane_frames false\nshow_startup_tips false\nshow_release_notes false\nsession_serialization false\n";
 const DEFAULT_LAYOUT: &str = "layout {\n    pane\n}\n";
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
+const CALL_ATTEMPTS: usize = 3;
 
 pub struct Zellij {
     env: Vec<(String, String)>,
     client: ZellijClient,
-    feeds: Vec<Child>,
+    feeds: Vec<PaneFeed>,
+    launched: Vec<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Repeat {
+    WhenSessionNotFound,
+    WhenSessionNotFoundOrSilent,
 }
 
 impl Zellij {
@@ -55,6 +63,7 @@ impl Zellij {
             env,
             client,
             feeds: Vec::new(),
+            launched: Vec::new(),
         }
     }
 
@@ -62,17 +71,53 @@ impl Zellij {
         command(&self.env, "zellij")
     }
 
-    fn action(&self, session: &str) -> Command {
-        let mut zellij = self.zellij();
-        zellij.args(["--session", session, "action"]);
+    fn call(&self, repeat: Repeat, arguments: impl Fn(&mut Command) -> &mut Command) -> Finished {
+        let mut finished = run(arguments(&mut self.zellij()));
 
-        zellij
+        for _ in 1..CALL_ATTEMPTS {
+            let not_found = !finished.success && is_no_session(&finished.stderr);
+            let silent = finished.success && finished.stdout.trim().is_empty();
+            let may_repeat_silent = repeat == Repeat::WhenSessionNotFoundOrSilent;
+
+            if !not_found && !(silent && may_repeat_silent) {
+                break;
+            }
+
+            finished = run(arguments(&mut self.zellij()));
+        }
+
+        finished
+    }
+
+    fn call_checked(&self, arguments: impl Fn(&mut Command) -> &mut Command) -> String {
+        let finished = self.call(Repeat::WhenSessionNotFound, &arguments);
+
+        match finished.into_result() {
+            Ok(stdout) => stdout,
+            Err(stderr) => panic!("{:?} failed: {stderr}", arguments(&mut self.zellij())),
+        }
+    }
+
+    fn act(&self, repeat: Repeat, session: &str, arguments: &[&str]) -> Finished {
+        self.call(repeat, |zellij| {
+            zellij
+                .args(["--session", session, "action"])
+                .args(arguments)
+        })
+    }
+
+    fn act_checked(&self, session: &str, arguments: &[&str]) -> String {
+        self.call_checked(|zellij| {
+            zellij
+                .args(["--session", session, "action"])
+                .args(arguments)
+        })
     }
 
     fn sessions(&self) -> Vec<String> {
-        let listing = run(self
-            .zellij()
-            .args(["list-sessions", "--short", "--no-formatting"]));
+        let listing = self.call(Repeat::WhenSessionNotFoundOrSilent, |zellij| {
+            zellij.args(["list-sessions", "--short", "--no-formatting"])
+        });
 
         if !listing.success {
             assert!(
@@ -93,7 +138,11 @@ impl Zellij {
     }
 
     fn rows(&self, session: &str) -> Vec<Value> {
-        let listing = run(self.action(session).args(["list-panes", "--all", "--json"]));
+        let listing = self.act(
+            Repeat::WhenSessionNotFoundOrSilent,
+            session,
+            &["list-panes", "--all", "--json"],
+        );
 
         if !listing.success {
             assert!(
@@ -110,11 +159,27 @@ impl Zellij {
             Err(error) => panic!("zellij list-panes printed non-JSON: {error}"),
         }
     }
+
+    fn unclaimed_floating_pane(&self) -> String {
+        let unclaimed: Vec<String> = self
+            .rows(SESSION)
+            .iter()
+            .filter(|row| row["is_plugin"] == false && row["is_floating"] == true)
+            .map(|row| row["id"].to_string())
+            .filter(|id| !self.launched.contains(id))
+            .collect();
+
+        match unclaimed.as_slice() {
+            [id] => id.clone(),
+            _ => panic!(
+                "zellij run printed no pane id and the session has {unclaimed:?} as new panes"
+            ),
+        }
+    }
 }
 
 impl Driver for Zellij {
     fn launch(&mut self, cwd: &Path, argv: &[String]) -> Pane {
-        let mut zellij = self.zellij();
         let full_screen_floating = [
             "--floating",
             "-x",
@@ -126,20 +191,21 @@ impl Driver for Zellij {
             "--height",
             "100%",
         ];
-        zellij
-            .args(["--session", SESSION, "run"])
-            .args(full_screen_floating)
-            .arg("--cwd")
-            .arg(cwd)
-            .arg("--")
-            .args(argv);
-
-        let reported = run_checked(&mut zellij);
-        let id = reported
-            .trim()
-            .strip_prefix("terminal_")
-            .unwrap_or_else(|| panic!("zellij run reported {reported:?}"))
-            .to_owned();
+        let reported = self.call_checked(|zellij| {
+            zellij
+                .args(["--session", SESSION, "run"])
+                .args(full_screen_floating)
+                .arg("--cwd")
+                .arg(cwd)
+                .arg("--")
+                .args(argv)
+        });
+        let id = match reported.trim().strip_prefix("terminal_") {
+            Some(id) => id.to_owned(),
+            None if reported.trim().is_empty() => self.unclaimed_floating_pane(),
+            None => panic!("zellij run reported {reported:?}"),
+        };
+        self.launched.push(id.clone());
 
         Pane {
             multiplexer: Multiplexer::Zellij,
@@ -149,48 +215,40 @@ impl Driver for Zellij {
     }
 
     fn follow(&mut self, pane: &Pane, feed: &Path) {
-        let sink = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(feed)
-            .unwrap_or_else(|error| panic!("open {}: {error}", feed.display()));
+        let env = self.env.clone();
+        let (session, id) = (pane.session.clone(), pane.id.clone());
+        let subscribe = move || {
+            let mut zellij = command(&env, "zellij");
+            zellij.args(["--session", &session, "subscribe", "--pane-id", &id]);
 
-        let subscriber = self
-            .zellij()
-            .args([
-                "--session",
-                &pane.session,
-                "subscribe",
-                "--pane-id",
-                &pane.id,
-            ])
-            .stdin(Stdio::null())
-            .stdout(sink)
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start zellij subscribe");
-        self.feeds.push(subscriber);
+            zellij
+        };
+
+        self.feeds.push(PaneFeed::follow(pane, subscribe, feed));
     }
 
     fn capture(&self, pane: &Pane, scrollback: bool) -> Result<String, String> {
-        let mut zellij = self.action(&pane.session);
-        zellij.args(["dump-screen", "--pane-id", &pane.id]);
+        let live = self.feeds.iter().find(|feed| feed.pane() == pane);
 
-        if scrollback {
-            zellij.arg("--full");
+        if let Some(feed) = live.filter(|_| !scrollback) {
+            return Ok(feed.viewport());
         }
 
-        run(&mut zellij).into_result()
+        let mut dump = vec!["dump-screen", "--pane-id", &pane.id];
+
+        if scrollback {
+            dump.push("--full");
+        }
+
+        self.act(Repeat::WhenSessionNotFoundOrSilent, &pane.session, &dump)
+            .into_result()
     }
 
     fn type_text(&self, pane: &Pane, text: &str) {
-        run_checked(self.action(&pane.session).args([
-            "write-chars",
-            "--pane-id",
-            &pane.id,
-            "--",
-            text,
-        ]));
+        self.act_checked(
+            &pane.session,
+            &["write-chars", "--pane-id", &pane.id, "--", text],
+        );
     }
 
     fn press(&self, pane: &Pane, key: Key) {
@@ -202,18 +260,12 @@ impl Driver for Zellij {
             Key::CtrlC => &["3"],
         };
 
-        run_checked(
-            self.action(&pane.session)
-                .args(["write", "--pane-id", &pane.id])
-                .args(bytes),
-        );
+        let write = [&["write", "--pane-id", &pane.id][..], bytes].concat();
+        self.act_checked(&pane.session, &write);
     }
 
     fn close(&self, pane: &Pane) {
-        run_checked(
-            self.action(&pane.session)
-                .args(["close-pane", "--pane-id", &pane.id]),
-        );
+        self.act_checked(&pane.session, &["close-pane", "--pane-id", &pane.id]);
     }
 
     fn panes(&self) -> Vec<ListedPane> {
@@ -231,18 +283,18 @@ impl Driver for Zellij {
     }
 
     fn shutdown(&mut self) {
-        let killed = run(self.zellij().args(["kill-all-sessions", "--yes"]));
+        for feed in &mut self.feeds {
+            feed.stop();
+        }
+
+        let killed = self.call(Repeat::WhenSessionNotFound, |zellij| {
+            zellij.args(["kill-all-sessions", "--yes"])
+        });
         if !killed.success && !is_no_session(&killed.stderr) {
             eprintln!(
                 "e2e: zellij kill-all-sessions failed: {}",
                 killed.stderr.trim()
             );
-        }
-
-        for feed in &mut self.feeds {
-            if let Err(error) = feed.kill().and_then(|()| feed.wait().map(|_| ())) {
-                eprintln!("e2e: zellij subscribe not stopped: {error}");
-            }
         }
 
         self.client.stop();

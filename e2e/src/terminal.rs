@@ -1,6 +1,7 @@
 mod tmux;
 mod zellij;
 mod zellij_client;
+mod zellij_pane_feed;
 
 use std::fmt;
 use std::path::{Path, PathBuf};

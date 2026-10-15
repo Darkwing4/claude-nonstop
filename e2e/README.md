@@ -35,7 +35,7 @@ log. Inside:
 | path | what |
 |---|---|
 | `screens/*.txt` | pane scrollback at the moment of failure |
-| `screens/*.feed` | raw pane output (tmux `pipe-pane`, `zellij subscribe`) |
+| `screens/*.feed` | pane output: raw bytes from tmux `pipe-pane`, viewport JSON lines from `zellij subscribe` (its stderr in `*.feed.err`) |
 | `claude-debug.log` | Claude Code `--debug-file` |
 | `mock/requests.jsonl` | every API request with `last_user_text` and the reply it got |
 | `hooks/` | StopFailure, Stop and SessionStart payloads in order |
@@ -67,6 +67,15 @@ scenario.wait_for_log("resume 1/3 written to", TURN);
 - Waiting is event driven: every `wait_for_*` re-checks its condition on any
   file change in the sandbox (inotify), the timeout is only the failure bound.
   Do not sleep.
+- zellij 0.45.1 hands a freed client id to the next connection while the
+  cleanup of its previous owner is still queued (fixed upstream by monotonic
+  ids in zellij-org/zellij#5630, not released yet), so under load a CLI call
+  can fail its session lookup with `There is no active session!` or lose its
+  reply. The zellij driver therefore reads screens from one `zellij subscribe`
+  stream per pane instead of calling `dump-screen`, resubscribes a stream that
+  ends while its pane is open, and repeats a call (3 attempts, no delay) only
+  when the session lookup failed or a read-only query printed nothing; a lost
+  `zellij run` reply is recovered from `list-panes`.
 - `claude-nonstop` runs with `LIMIT_MARGIN_SECONDS=0`, `LIMIT_VERIFY_SECONDS=1`,
   `OVERLOAD_BACKOFF_SECONDS=1,2`, `OVERLOAD_JITTER_PERCENT=0`; anything else goes
   through `.env(..)`. An unknown `CLAUDE_NONSTOP_*` variable breaks every command.

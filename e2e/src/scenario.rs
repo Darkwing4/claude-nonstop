@@ -248,6 +248,13 @@ impl Scenario {
         self.daemon = Some(daemon);
     }
 
+    pub fn daemon_pid(&self) -> u32 {
+        self.daemon
+            .as_ref()
+            .expect("the daemon is not running: call start_daemon first")
+            .id()
+    }
+
     pub fn wait_for<T>(
         &self,
         what: &str,

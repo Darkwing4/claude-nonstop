@@ -127,6 +127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "claude-nonstop-e2e"
+version = "0.0.0"
+dependencies = [
+ "rustix",
+ "serde_json",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

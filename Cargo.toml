@@ -9,7 +9,10 @@ repository = "https://github.com/Darkwing4/claude-nonstop"
 readme = "README.md"
 keywords = ["claude-code", "tmux", "zellij", "retry"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = [".github/", "docs/", "install.sh", "samples/"]
+exclude = [".github/", "docs/", "e2e/", "install.sh", "samples/"]
+
+[workspace]
+members = ["e2e"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

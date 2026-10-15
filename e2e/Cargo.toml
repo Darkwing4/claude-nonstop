@@ -1,0 +1,12 @@
+[package]
+name = "claude-nonstop-e2e"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "End-to-end scenarios for claude-nonstop against a real Claude Code in Docker"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+serde_json = "1"
+rustix = { version = "1", features = ["fs", "event", "process", "pty", "termios", "net"] }

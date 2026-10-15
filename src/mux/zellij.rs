@@ -108,8 +108,7 @@ impl Zellij {
             .arg("--cwd")
             .arg(cwd)
             .arg("--")
-            .arg("/usr/bin/env");
-        command.args(argv);
+            .args(argv);
         let stdout = run_checked(&mut command, ACTION_TIMEOUT)?;
         let pane_id = stdout
             .trim()

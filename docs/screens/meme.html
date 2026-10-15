@@ -1,11 +1,6 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="size" content="860x520">
+<html><head><meta charset="utf-8"><meta name="size" content="860x520"><link rel="stylesheet" href="screen.css">
 <style>
-* {
-  box-sizing: border-box;
-  margin: 0;
-}
-
 body {
   position: relative;
   width: 860px;
@@ -31,25 +26,17 @@ body {
   padding: 26px 34px;
   border: 12px solid #2a2c31;
   border-radius: 16px;
-  background: #0d0e11;
-  color: #e6e4df;
-  font-family: "DejaVu Sans Mono", monospace;
+  background: var(--screen);
+  color: var(--ink);
+  font-family: var(--mono);
   font-size: 19px;
   line-height: 1.55;
   white-space: pre;
 }
 
-.claude { color: #d97757; }
-.error { color: #ff6b6b; }
-.dim { color: #8b8f96; }
-.warn { color: #e5b45a; }
-
 .prompt {
-  margin-top: 14px;
   padding: 4px 0;
-  border-top: 2px solid #4a4e55;
-  border-bottom: 2px solid #4a4e55;
-  color: #8b8f96;
+  border-width: 2px 0;
 }
 
 svg {

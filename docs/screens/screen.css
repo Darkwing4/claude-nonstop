@@ -62,7 +62,3 @@ body {
   padding-left: 2ch;
   color: var(--warn);
 }
-
-.footer .dim {
-  color: var(--dim);
-}

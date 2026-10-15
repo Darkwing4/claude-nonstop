@@ -1,18 +1,16 @@
 use std::sync::LazyLock;
 
-use regex::Regex;
+use regex::{Regex, RegexSet};
 
-static BUSY: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [
+static BUSY: LazyLock<RegexSet> = LazyLock::new(|| {
+    RegexSet::new([
         r"(?i)esc to interrupt",
         r"(?i)\bretrying in\b",
         r"(?i)\battempt \d+/\d+",
         r"(?i)will retry in",
         r"(?i)waiting for \d+ background agents? to finish",
-    ]
-    .iter()
-    .map(|pattern| Regex::new(pattern).expect("busy regex"))
-    .collect()
+    ])
+    .expect("busy regex")
 });
 static BOX_CHARS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[─━│┃╭╮╰╯┌┐└┘┄┈▏▕]").expect("box regex"));
@@ -61,15 +59,19 @@ pub fn strip_ansi(raw: &[u8]) -> String {
 }
 
 pub fn is_busy(screen: &str) -> bool {
-    BUSY.iter().any(|pattern| pattern.is_match(screen))
+    BUSY.is_match(screen)
 }
 
 pub fn input_line(screen: &str, glyph: char) -> Option<String> {
     let lines: Vec<&str> = screen.lines().collect();
-    let index = lines.iter().rposition(|line| is_prompt_line(line, glyph))?;
-    let mut parts = vec![strip_prompt(lines[index], glyph)];
+    let (index, first) = lines
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, line)| prompt_rest(line, glyph).map(|rest| (index, rest)))?;
+    let mut parts = vec![first];
     for line in &lines[index + 1..] {
-        if is_prompt_line(line, glyph) {
+        if prompt_rest(line, glyph).is_some() {
             break;
         }
         let rest = BOX_CHARS.replace_all(line, "");
@@ -83,19 +85,13 @@ pub fn input_line(screen: &str, glyph: char) -> Option<String> {
 }
 
 fn is_footer(line: &str) -> bool {
-    line.starts_with('⏵') || line.starts_with('⏸') || line.starts_with('?') || line.starts_with('✻')
+    line.starts_with(['⏵', '⏸', '?', '✻'])
 }
 
-fn is_prompt_line(line: &str, glyph: char) -> bool {
+fn prompt_rest(line: &str, glyph: char) -> Option<String> {
     let cleaned = BOX_CHARS.replace_all(line, "");
-    cleaned.trim_start().starts_with(glyph)
-}
-
-fn strip_prompt(line: &str, glyph: char) -> String {
-    let cleaned = BOX_CHARS.replace_all(line, "");
-    let trimmed = cleaned.trim_start();
-    let after = trimmed.strip_prefix(glyph).unwrap_or(trimmed);
-    after.trim().to_owned()
+    let rest = cleaned.trim_start().strip_prefix(glyph)?;
+    Some(rest.trim().to_owned())
 }
 
 fn collapse(text: &str) -> String {

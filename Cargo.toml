@@ -18,7 +18,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 toml_edit = { version = "0.25", features = ["serde"] }
 regex = "1"
 jiff = "0.2"
-rustix = { version = "1", features = ["fs", "process", "event", "time", "pipe"] }
+rustix = { version = "1", features = ["fs", "process", "event", "time"] }
 
 [profile.release]
 lto = true

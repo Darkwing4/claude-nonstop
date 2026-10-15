@@ -9,7 +9,7 @@ os=$(uname -s)
 arch=$(uname -m)
 case "$os-$arch" in
   Linux-x86_64) target=x86_64-unknown-linux-musl ;;
-  Linux-aarch64|Linux-arm64) target=aarch64-unknown-linux-musl ;;
+  Linux-aarch64) target=aarch64-unknown-linux-musl ;;
   *) echo "unsupported platform: $os $arch" >&2; exit 1 ;;
 esac
 
@@ -24,7 +24,7 @@ trap 'rm -rf "$tmp"' EXIT
 curl -fsSL "$base/$name.tar.gz" -o "$tmp/$name.tar.gz"
 curl -fsSL "$base/$name.tar.gz.sha256" -o "$tmp/$name.tar.gz.sha256"
 cd "$tmp"
-if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "$name.tar.gz.sha256"; else shasum -a 256 -c "$name.tar.gz.sha256"; fi
+sha256sum -c "$name.tar.gz.sha256"
 tar xzf "$name.tar.gz"
 mkdir -p "$dir"
 install -m 0755 "$name/claude-nonstop" "$dir/claude-nonstop"

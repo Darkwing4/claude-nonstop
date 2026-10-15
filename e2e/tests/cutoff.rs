@@ -402,7 +402,11 @@ fn expect_nothing_typed(scenario: &Scenario, input_line: &str) {
             .all(|prompt| prompt.as_deref() == Some(PROMPT)),
         "only the user's prompt reaches the API: {prompts:?}"
     );
-    assert_eq!(scenario.screen().input_line().as_deref(), Some(input_line));
+    scenario.wait_for_screen(
+        &format!("claude idle with {input_line:?} in the input line"),
+        TURN,
+        |screen| !screen.is_busy() && screen.input_line().as_deref() == Some(input_line),
+    );
     assert!(
         scenario.sandbox.cutoff_counter(&session_id).is_none(),
         "no continue is counted"
@@ -426,11 +430,12 @@ fn hook_verdicts(scenario: &Scenario, count: usize, timeout: Duration) -> Vec<St
                 .map(str::to_owned)
                 .collect();
 
+            let sent_prompt_still_shown = format!("has text in its input line ({} chars)", PROMPT.len());
             for verdict in &verdicts {
                 assert!(
-                    !verdict.contains("is busy with a turn"),
-                    "KNOWN BUG 5: the hook types the moment the turn ends, can still see Claude Code's busy \
-                     footer and gives up without a retry: {verdict}"
+                    !verdict.contains("is busy with a turn") && !verdict.contains(&sent_prompt_still_shown),
+                    "KNOWN BUG 5: the hook reads the pane the moment the turn ends, can still see Claude Code's \
+                     busy footer or the prompt just sent, and gives up without a retry: {verdict}"
                 );
             }
 

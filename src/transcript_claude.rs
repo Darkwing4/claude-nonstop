@@ -68,25 +68,21 @@ pub fn progressed_since(path: &Path, offset: u64, prompts: &[&str]) -> io::Resul
     }
     let start = offset.max(size.saturating_sub(SCAN_BYTES));
     let kinds = kinds_after(path, start, start > offset, prompts)?;
+    let is_progress = |kind: &Option<UserRecord>| {
+        matches!(kind, Some(UserRecord::UserPrompt | UserRecord::ToolResult))
+    };
+
     if let Some(last_prompt) = kinds
         .iter()
         .rposition(|kind| *kind == Some(UserRecord::OurPrompt))
     {
-        return Ok(kinds[last_prompt + 1..].iter().any(|kind| {
-            matches!(
-                kind,
-                Some(UserRecord::UserPrompt) | Some(UserRecord::ToolResult)
-            )
-        }));
+        return Ok(kinds[last_prompt + 1..].iter().any(is_progress));
     }
+
     if start > offset {
-        return Ok(kinds.iter().any(|kind| {
-            matches!(
-                kind,
-                Some(UserRecord::UserPrompt) | Some(UserRecord::ToolResult)
-            )
-        }));
+        return Ok(kinds.iter().any(is_progress));
     }
+
     Ok(false)
 }
 
@@ -96,16 +92,9 @@ fn kinds_after(
     drop_partial_first: bool,
     prompts: &[&str],
 ) -> io::Result<Vec<Option<UserRecord>>> {
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(start))?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data)?;
-    let mut lines: Vec<&[u8]> = data.split(|byte| *byte == b'\n').collect();
-    if drop_partial_first && !lines.is_empty() {
-        lines.remove(0);
-    }
+    let data = read_lines_from(path, start, drop_partial_first)?;
     let mut kinds = Vec::new();
-    for raw in lines {
+    for raw in data.split(|byte| *byte == b'\n') {
         if raw.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
@@ -117,9 +106,179 @@ fn kinds_after(
     Ok(kinds)
 }
 
+fn read_lines_from(path: &Path, start: u64, drop_partial_first: bool) -> io::Result<Vec<u8>> {
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(start))?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)?;
+
+    if drop_partial_first {
+        let first_line_end = data
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(data.len(), |index| index + 1);
+        data.drain(..first_line_end);
+    }
+
+    Ok(data)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitRecord {
+    pub at: u64,
+    pub text: String,
+    pub kind: crate::ledger::LimitType,
+}
+
+pub fn latest_limit_record(
+    path: &Path,
+    overload: &crate::config::Overload,
+) -> io::Result<Option<LimitRecord>> {
+    let start = std::fs::metadata(path)?.len().saturating_sub(SCAN_BYTES);
+    let data = read_lines_from(path, start, start > 0)?;
+    let latest = data
+        .split(|byte| *byte == b'\n')
+        .rev()
+        .find_map(|raw| parse_limit_line(raw, overload));
+    Ok(latest.map(|(_, found)| found))
+}
+
+pub fn parse_limit_line(
+    raw: &[u8],
+    overload: &crate::config::Overload,
+) -> Option<(Value, LimitRecord)> {
+    if !raw.windows(12).any(|window| window == b"\"rate_limit\"") {
+        return None;
+    }
+
+    let record = serde_json::from_slice::<Value>(raw).ok()?;
+    let found = classify_limit_record(&record, overload)?;
+    Some((record, found))
+}
+
+fn classify_limit_record(
+    record: &Value,
+    overload: &crate::config::Overload,
+) -> Option<LimitRecord> {
+    if record.get("type").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    if record.get("isApiErrorMessage").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    if record.get("error").and_then(Value::as_str) != Some("rate_limit") {
+        return None;
+    }
+    let text = record_text(record);
+    if crate::hook::classify("rate_limit", Some(&text), overload)
+        != crate::hook::HookKind::RateLimit
+    {
+        return None;
+    }
+    let at = record_timestamp(record).unwrap_or(0);
+    Some(LimitRecord {
+        at,
+        kind: limit_kind(&text),
+        text,
+    })
+}
+
+pub fn limit_kind(text: &str) -> crate::ledger::LimitType {
+    let lowered = text.to_ascii_lowercase();
+    if lowered.contains("/usage-credits") || lowered.contains("switch models") {
+        return crate::ledger::LimitType::Model;
+    }
+    if lowered.contains("week") {
+        return crate::ledger::LimitType::Weekly;
+    }
+    if lowered.contains("session limit") || lowered.contains("-hour limit") {
+        return crate::ledger::LimitType::FiveHour;
+    }
+    crate::ledger::LimitType::Unknown
+}
+
+pub fn progressed_after(path: &Path, since: u64) -> io::Result<bool> {
+    let start = std::fs::metadata(path)?.len().saturating_sub(SCAN_BYTES);
+    let data = read_lines_from(path, start, start > 0)?;
+    for raw in data.split(|byte| *byte == b'\n').rev() {
+        let Ok(record) = serde_json::from_slice::<Value>(raw) else {
+            continue;
+        };
+        let Some(at) = record_timestamp(&record) else {
+            continue;
+        };
+        if at <= since {
+            break;
+        }
+        if is_progress_record(&record) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn is_progress_record(record: &Value) -> bool {
+    if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    match record.get("type").and_then(Value::as_str) {
+        Some("user") => record
+            .pointer("/message/content")
+            .and_then(Value::as_array)
+            .is_some_and(|blocks| {
+                blocks
+                    .iter()
+                    .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+            }),
+        Some("assistant") => {
+            if record.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true) {
+                return false;
+            }
+            let usage = record.pointer("/message/usage");
+            let total: u64 = [
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ]
+            .iter()
+            .filter_map(|key| {
+                usage
+                    .and_then(|usage| usage.get(key))
+                    .and_then(Value::as_u64)
+            })
+            .sum();
+            total > 0
+        }
+        _ => false,
+    }
+}
+
+fn record_text(record: &Value) -> String {
+    match record.pointer("/message/content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+pub fn record_timestamp(record: &Value) -> Option<u64> {
+    let stamp = record.get("timestamp").and_then(Value::as_str)?;
+    let parsed: jiff::Timestamp = stamp.parse().ok()?;
+    u64::try_from(parsed.as_second()).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ledger::LimitType;
     use std::io::Write;
     use std::path::PathBuf;
 
@@ -250,178 +409,6 @@ mod tests {
             None
         );
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LimitRecord {
-    pub at: u64,
-    pub text: String,
-    pub kind: crate::ledger::LimitType,
-}
-
-pub fn latest_limit_record(
-    path: &Path,
-    overload: &crate::config::Overload,
-) -> io::Result<Option<LimitRecord>> {
-    let size = std::fs::metadata(path)?.len();
-    let start = size.saturating_sub(SCAN_BYTES);
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(start))?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data)?;
-    let mut lines: Vec<&[u8]> = data.split(|byte| *byte == b'\n').collect();
-    if start > 0 && !lines.is_empty() {
-        lines.remove(0);
-    }
-    for raw in lines.iter().rev() {
-        if !raw.windows(12).any(|window| window == b"\"rate_limit\"") {
-            continue;
-        }
-        let Ok(record) = serde_json::from_slice::<Value>(raw) else {
-            continue;
-        };
-        if let Some(found) = classify_limit_record(&record, overload) {
-            return Ok(Some(found));
-        }
-    }
-    Ok(None)
-}
-
-pub fn classify_limit_record(
-    record: &Value,
-    overload: &crate::config::Overload,
-) -> Option<LimitRecord> {
-    if record.get("type").and_then(Value::as_str) != Some("assistant") {
-        return None;
-    }
-    if record.get("isApiErrorMessage").and_then(Value::as_bool) != Some(true) {
-        return None;
-    }
-    if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-        return None;
-    }
-    if record.get("error").and_then(Value::as_str) != Some("rate_limit") {
-        return None;
-    }
-    let text = record_text(record);
-    if crate::hook::classify("rate_limit", Some(&text), overload)
-        != crate::hook::HookKind::RateLimit
-    {
-        return None;
-    }
-    let at = record_timestamp(record).unwrap_or(0);
-    Some(LimitRecord {
-        at,
-        kind: limit_kind(&text),
-        text,
-    })
-}
-
-pub fn limit_kind(text: &str) -> crate::ledger::LimitType {
-    let lowered = text.to_ascii_lowercase();
-    if lowered.contains("/usage-credits") || lowered.contains("switch models") {
-        return crate::ledger::LimitType::Model;
-    }
-    if lowered.contains("week") {
-        return crate::ledger::LimitType::Weekly;
-    }
-    if lowered.contains("session limit") || lowered.contains("-hour limit") {
-        return crate::ledger::LimitType::FiveHour;
-    }
-    crate::ledger::LimitType::Unknown
-}
-
-pub fn progressed_after(path: &Path, since: u64) -> io::Result<bool> {
-    let size = std::fs::metadata(path)?.len();
-    let start = size.saturating_sub(SCAN_BYTES);
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(start))?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data)?;
-    let mut lines: Vec<&[u8]> = data.split(|byte| *byte == b'\n').collect();
-    if start > 0 && !lines.is_empty() {
-        lines.remove(0);
-    }
-    for raw in lines.iter().rev() {
-        let Ok(record) = serde_json::from_slice::<Value>(raw) else {
-            continue;
-        };
-        let Some(at) = record_timestamp(&record) else {
-            continue;
-        };
-        if at <= since {
-            break;
-        }
-        if is_progress_record(&record) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn is_progress_record(record: &Value) -> bool {
-    if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-        return false;
-    }
-    match record.get("type").and_then(Value::as_str) {
-        Some("user") => record
-            .pointer("/message/content")
-            .and_then(Value::as_array)
-            .is_some_and(|blocks| {
-                blocks
-                    .iter()
-                    .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
-            }),
-        Some("assistant") => {
-            if record.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true) {
-                return false;
-            }
-            let usage = record.pointer("/message/usage");
-            let total: u64 = [
-                "input_tokens",
-                "output_tokens",
-                "cache_creation_input_tokens",
-                "cache_read_input_tokens",
-            ]
-            .iter()
-            .filter_map(|key| {
-                usage
-                    .and_then(|usage| usage.get(key))
-                    .and_then(Value::as_u64)
-            })
-            .sum();
-            total > 0
-        }
-        _ => false,
-    }
-}
-
-fn record_text(record: &Value) -> String {
-    match record.pointer("/message/content") {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(blocks)) => blocks
-            .iter()
-            .filter_map(|block| block.get("text").and_then(Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
-    }
-}
-
-pub fn record_timestamp(record: &Value) -> Option<u64> {
-    let stamp = record.get("timestamp").and_then(Value::as_str)?;
-    let parsed: jiff::Timestamp = stamp.parse().ok()?;
-    u64::try_from(parsed.as_second()).ok()
-}
-
-#[cfg(test)]
-mod limit_tests {
-    use super::*;
-    use crate::ledger::LimitType;
-
-    fn latest_limit_record(path: &Path) -> io::Result<Option<LimitRecord>> {
-        super::latest_limit_record(path, &crate::config::Overload::default())
-    }
 
     #[test]
     fn capacity_errors_do_not_become_usage_limits() {
@@ -436,12 +423,8 @@ mod limit_tests {
             let raw = limit(text, "2026-09-03T06:43:54.740Z");
             let record = serde_json::from_str(&raw).unwrap();
             assert!(classify_limit_record(&record, &overload).is_none());
-            let file = path("capacity.jsonl", &[raw]);
-            assert!(
-                super::latest_limit_record(&file, &overload)
-                    .unwrap()
-                    .is_none()
-            );
+            let file = transcript("capacity.jsonl", &[raw]);
+            assert!(latest_limit_record(&file, &overload).unwrap().is_none());
         }
     }
 
@@ -453,17 +436,9 @@ mod limit_tests {
         serde_json::json!({"type":"assistant","timestamp":stamp,"message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":12,"output_tokens":3}}}).to_string()
     }
 
-    fn path(name: &str, lines: &[String]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("claude-nonstop-limit-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join(name);
-        std::fs::write(&file, lines.join("\n") + "\n").unwrap();
-        file
-    }
-
     #[test]
     fn newest_rate_limit_record_wins_and_is_classified() {
-        let file = path(
+        let file = transcript(
             "limits.jsonl",
             &[
                 limit(
@@ -477,7 +452,9 @@ mod limit_tests {
                 ),
             ],
         );
-        let found = latest_limit_record(&file).unwrap().unwrap();
+        let found = latest_limit_record(&file, &crate::config::Overload::default())
+            .unwrap()
+            .unwrap();
         assert_eq!(found.kind, LimitType::FiveHour);
         assert!(found.text.contains("resets 5:30pm"));
         assert_eq!(found.at, 1788417834);
@@ -494,16 +471,19 @@ mod limit_tests {
             LimitType::Model
         );
         assert!(
-            latest_limit_record(&path("none.jsonl", &[worked("2026-09-03T06:00:00.000Z")]))
-                .unwrap()
-                .is_none()
+            latest_limit_record(
+                &transcript("none.jsonl", &[worked("2026-09-03T06:00:00.000Z")]),
+                &crate::config::Overload::default()
+            )
+            .unwrap()
+            .is_none()
         );
     }
 
     #[test]
     fn progress_after_an_instant_needs_real_work() {
-        let file = path(
-            "progress.jsonl",
+        let file = transcript(
+            "progress_after.jsonl",
             &[
                 worked("2026-09-03T06:00:00.000Z"),
                 limit(

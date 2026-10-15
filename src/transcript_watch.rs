@@ -66,7 +66,7 @@ impl TranscriptWatch {
             Ok(source) => {
                 for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
                     let path = entry.path();
-                    if path.extension().is_some_and(|ext| ext == "jsonl") {
+                    if is_transcript(&entry.file_name()) {
                         let size = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
                         self.offsets.insert(path, size);
                     }
@@ -125,13 +125,7 @@ impl TranscriptWatch {
             .insert(path.to_path_buf(), start + complete as u64);
         let mut seen = Vec::new();
         for raw in bytes[..complete].split(|byte| *byte == b'\n') {
-            if !raw.windows(12).any(|window| window == b"\"rate_limit\"") {
-                continue;
-            }
-            let Ok(record) = serde_json::from_slice::<serde_json::Value>(raw) else {
-                continue;
-            };
-            let Some(limit) = transcript_claude::classify_limit_record(&record, &self.overload)
+            let Some((record, limit)) = transcript_claude::parse_limit_line(raw, &self.overload)
             else {
                 continue;
             };
@@ -171,18 +165,10 @@ fn read_range(path: &Path, start: u64, end: u64) -> Result<Vec<u8>> {
     let mut file = std::fs::File::open(path).map_err(|source| Error::io(path, "open", source))?;
     file.seek(SeekFrom::Start(start))
         .map_err(|source| Error::io(path, "seek", source))?;
-    let mut bytes = vec![0u8; usize::try_from(end.saturating_sub(start)).unwrap_or(0)];
-    let mut filled = 0;
-    while filled < bytes.len() {
-        let read = file
-            .read(&mut bytes[filled..])
-            .map_err(|source| Error::io(path, "read", source))?;
-        if read == 0 {
-            bytes.truncate(filled);
-            break;
-        }
-        filled += read;
-    }
+    let mut bytes = Vec::new();
+    file.take(end.saturating_sub(start))
+        .read_to_end(&mut bytes)
+        .map_err(|source| Error::io(path, "read", source))?;
     Ok(bytes)
 }
 

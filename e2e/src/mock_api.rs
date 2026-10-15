@@ -47,6 +47,10 @@ pub enum Reply {
         name: String,
         input: Value,
     },
+    Slow {
+        delay: Duration,
+        reply: Box<Reply>,
+    },
 }
 
 impl Reply {
@@ -84,6 +88,13 @@ impl Reply {
         }
     }
 
+    pub fn slow(delay: Duration, reply: Reply) -> Reply {
+        Reply::Slow {
+            delay,
+            reply: Box::new(reply),
+        }
+    }
+
     fn label(&self) -> String {
         match self {
             Reply::Ok { .. } => "ok".to_owned(),
@@ -91,6 +102,7 @@ impl Reply {
             Reply::UsageLimit { claim, reset_at } => {
                 format!("usage limit {claim:?} until {reset_at}")
             }
+            Reply::Slow { delay, reply } => format!("{} after {delay:?}", reply.label()),
             other => format!("{other:?}"),
         }
     }
@@ -488,6 +500,11 @@ fn respond(
             ))?;
 
             Ok(Connection::Close)
+        }
+        Reply::Slow { delay, reply } => {
+            thread::sleep(*delay);
+
+            respond(writer, reader, reply, stream, model)
         }
     }
 }

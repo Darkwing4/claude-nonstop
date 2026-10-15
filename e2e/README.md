@@ -10,6 +10,7 @@ touches your `~/.claude`, `~/.claude.json` or multiplexer sessions.
 e2e/run.sh                 # whole matrix
 e2e/run.sh s0_             # one group: any libtest name filter
 e2e/run.sh --exact b1_turn_cut_off_by_server_errors_is_continued_tmux
+e2e/run.sh --skip _slow_   # everything but the slow scenarios
 ```
 
 Needs Docker and a Claude Code binary in `~/.local/share/claude/versions/`
@@ -19,7 +20,11 @@ x86_64) and needs network for that; `cargo fetch` runs on the host, the
 container builds offline into `target/e2e`.
 
 Test names start with the matrix id (`s0_`, `b1_`, `d1_`) and end with the
-multiplexer (`_tmux`, `_zellij`), so both work as filters.
+multiplexer (`_tmux`, `_zellij`), so both work as filters. A scenario that has
+to sit out a delay claude-nonstop does not let us shorten (the 60 s typing
+backoff, `limit.probe_minutes` of at least a minute, the 120 s limit episode
+window) has `_slow_` right before the multiplexer, `d5_…_slow_tmux`:
+`e2e/run.sh _slow_` runs only those, `--skip _slow_` leaves them out.
 
 ## Failures
 

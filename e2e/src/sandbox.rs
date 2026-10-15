@@ -295,6 +295,16 @@ impl Sandbox {
             .find(|path| path.is_file())
     }
 
+    pub fn kill_process(&self, pid: u32) {
+        let pid = i32::try_from(pid)
+            .ok()
+            .and_then(Pid::from_raw)
+            .unwrap_or_else(|| panic!("{pid} is not a process id"));
+        let exits: Vec<OwnedFd> = kill(pid).into_iter().collect();
+
+        wait_for_exits(&exits);
+    }
+
     pub fn kill_processes(&self) {
         loop {
             let victims = self.own_processes();

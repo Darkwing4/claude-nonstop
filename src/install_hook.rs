@@ -100,6 +100,13 @@ pub fn uninstall(paths: &Paths) -> Result<Vec<String>> {
 }
 
 pub fn installed_commands(settings: &Map<String, Value>) -> Vec<String> {
+    stop_failure_commands(settings)
+        .into_iter()
+        .filter(|command| command.contains(HOOK_MARKER))
+        .collect()
+}
+
+pub fn stop_failure_commands(settings: &Map<String, Value>) -> Vec<String> {
     settings
         .get("hooks")
         .and_then(|hooks| hooks.get("StopFailure"))
@@ -109,7 +116,6 @@ pub fn installed_commands(settings: &Map<String, Value>) -> Vec<String> {
         .filter_map(|group| group.get("hooks").and_then(Value::as_array))
         .flatten()
         .filter_map(|entry| entry.get("command").and_then(Value::as_str))
-        .filter(|command| command.contains(HOOK_MARKER))
         .map(str::to_owned)
         .collect()
 }

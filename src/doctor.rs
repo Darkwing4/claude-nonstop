@@ -4,9 +4,11 @@ use std::process::Command;
 use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::config;
 use crate::error::Result;
+use crate::install_hook;
 use crate::paths::Paths;
 use crate::platform::process::{CommandOutcome, run_with_timeout};
 
@@ -58,7 +60,7 @@ pub fn run(paths: &Paths, fix: bool) -> Result<Vec<Finding>> {
     ];
     findings.extend(multiplexers());
     findings.push(claude_version());
-    findings.extend(hook(paths)?);
+    findings.extend(hook(paths));
     findings.push(daemon_unit(paths));
     Ok(findings)
 }
@@ -186,11 +188,8 @@ fn binary_on_path() -> Finding {
     }
 }
 
-fn max_retries(settings: &serde_json::Value) -> Finding {
-    let configured = settings
-        .as_object()
-        .and_then(crate::install_retry_limit::configured);
-    match configured {
+fn max_retries(settings: &Map<String, Value>) -> Finding {
+    match crate::install_retry_limit::configured(settings) {
         Some(count) => Finding::new(
             "max-retries",
             Severity::Info,
@@ -209,47 +208,41 @@ fn max_retries(settings: &serde_json::Value) -> Finding {
 }
 
 fn multiplexers() -> Vec<Finding> {
+    let probes = [
+        (
+            "tmux",
+            "-V",
+            MIN_TMUX,
+            "claude-nonstop is tested with tmux 3.0 or newer",
+        ),
+        (
+            "zellij",
+            "--version",
+            MIN_ZELLIJ,
+            "full screen dumps need zellij 0.35 or newer",
+        ),
+    ];
     let mut findings = Vec::new();
-    let tmux = version_of("tmux", &["-V"]);
-    let zellij = version_of("zellij", &["--version"]);
-    match tmux {
-        Some(version) if version >= MIN_TMUX => findings.push(Finding::new(
-            "mux",
-            Severity::Info,
-            format!("tmux {}.{}", version.0, version.1),
-        )),
-        Some(version) => findings.push(
-            Finding::new(
-                "mux",
-                Severity::Warn,
-                format!(
-                    "tmux {}.{} is older than {}.{}",
-                    version.0, version.1, MIN_TMUX.0, MIN_TMUX.1
-                ),
-            )
-            .hint("claude-nonstop is tested with tmux 3.0 or newer"),
-        ),
-        None => {}
+    for (program, version_flag, minimum, upgrade_hint) in probes {
+        let Some(version) = version_of(program, &[version_flag]) else {
+            continue;
+        };
+
+        let label = format!("{program} {}.{}", version.0, version.1);
+        if version >= minimum {
+            findings.push(Finding::new("mux", Severity::Info, label));
+        } else {
+            findings.push(
+                Finding::new(
+                    "mux",
+                    Severity::Warn,
+                    format!("{label} is older than {}.{}", minimum.0, minimum.1),
+                )
+                .hint(upgrade_hint),
+            );
+        }
     }
-    match zellij {
-        Some(version) if version >= MIN_ZELLIJ => findings.push(Finding::new(
-            "mux",
-            Severity::Info,
-            format!("zellij {}.{}", version.0, version.1),
-        )),
-        Some(version) => findings.push(
-            Finding::new(
-                "mux",
-                Severity::Warn,
-                format!(
-                    "zellij {}.{} is older than {}.{}",
-                    version.0, version.1, MIN_ZELLIJ.0, MIN_ZELLIJ.1
-                ),
-            )
-            .hint("full screen dumps need zellij 0.35 or newer"),
-        ),
-        None => {}
-    }
+
     if findings.is_empty() {
         findings.push(
             Finding::new(
@@ -288,34 +281,25 @@ fn claude_version() -> Finding {
     }
 }
 
-fn hook(paths: &Paths) -> Result<Vec<Finding>> {
+fn hook(paths: &Paths) -> Vec<Finding> {
     let settings_path = paths.claude_settings();
-    let Some(bytes) = crate::atomic_file::read_optional(&settings_path)? else {
-        return Ok(vec![
-            Finding::new(
-                "hook",
-                Severity::Warn,
-                format!("{} does not exist", settings_path.display()),
-            )
-            .hint("run claude-nonstop install"),
-        ]);
-    };
-    let settings: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(value) => value,
-        Err(error) => {
-            return Ok(vec![Finding::new(
-                "hook",
-                Severity::Error,
-                format!("{}: {error}", settings_path.display()),
-            )]);
+    let settings = match install_hook::read_settings(&settings_path) {
+        Ok((settings, true)) => settings,
+        Ok((_, false)) => {
+            return vec![
+                Finding::new(
+                    "hook",
+                    Severity::Warn,
+                    format!("{} does not exist", settings_path.display()),
+                )
+                .hint("run claude-nonstop install"),
+            ];
         }
+        Err(error) => return vec![Finding::new("hook", Severity::Error, error.to_string())],
     };
+
     let mut findings = vec![max_retries(&settings)];
-    if settings
-        .get("disableAllHooks")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-    {
+    if settings.get("disableAllHooks").and_then(Value::as_bool) == Some(true) {
         findings.push(
             Finding::new(
                 "hook",
@@ -325,20 +309,7 @@ fn hook(paths: &Paths) -> Result<Vec<Finding>> {
             .hint("set disableAllHooks to false"),
         );
     }
-    let commands: Vec<String> = settings
-        .pointer("/hooks/StopFailure")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|group| group.get("hooks").and_then(serde_json::Value::as_array))
-        .flatten()
-        .filter_map(|entry| entry.get("command").and_then(serde_json::Value::as_str))
-        .map(str::to_owned)
-        .collect();
-    let ours: Vec<&String> = commands
-        .iter()
-        .filter(|command| command.contains("claude-nonstop hook"))
-        .collect();
+    let ours = install_hook::installed_commands(&settings);
     let current = std::env::current_exe().ok();
     match (ours.first(), current) {
         (None, _) => findings.push(
@@ -361,7 +332,7 @@ fn hook(paths: &Paths) -> Result<Vec<Finding>> {
             "StopFailure hook installed",
         )),
     }
-    for command in &commands {
+    for command in install_hook::stop_failure_commands(&settings) {
         if let Some(name) = COMPETING_HOOKS.iter().find(|name| command.contains(*name)) {
             findings.push(
                 Finding::new(
@@ -373,7 +344,7 @@ fn hook(paths: &Paths) -> Result<Vec<Finding>> {
             );
         }
     }
-    Ok(findings)
+    findings
 }
 
 fn daemon_unit(paths: &Paths) -> Finding {

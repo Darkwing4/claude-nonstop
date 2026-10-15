@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-15
+
 ### Removed
 
 - `notify.channel` and notifications over terminal OSC and bell: they were never delivered. An existing `notify.channel` setting is ignored.

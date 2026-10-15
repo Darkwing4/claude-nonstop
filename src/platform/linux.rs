@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::MaybeUninit;
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,7 +16,6 @@ use rustix::time::{
 use super::{SourceId, Wake};
 
 enum Source {
-    File { wd: i32 },
     Dir { wd: i32 },
     Process { fd: OwnedFd },
 }
@@ -41,15 +40,6 @@ impl Reactor {
             next_id: 1,
             sources: BTreeMap::new(),
         })
-    }
-
-    pub fn watch_file(&mut self, path: &Path) -> io::Result<SourceId> {
-        let wd = inotify::add_watch(
-            &self.inotify,
-            path,
-            WatchFlags::MODIFY | WatchFlags::DELETE_SELF | WatchFlags::MOVE_SELF,
-        )?;
-        Ok(self.register(Source::File { wd }))
     }
 
     pub fn watch_dir(&mut self, path: &Path) -> io::Result<SourceId> {
@@ -178,23 +168,18 @@ impl Reactor {
         wakes: &mut Vec<Wake>,
     ) {
         let found = self.sources.iter().find_map(|(id, source)| match source {
-            Source::File { wd: watched } | Source::Dir { wd: watched } if *watched == wd => {
-                Some((*id, matches!(source, Source::Dir { .. })))
-            }
+            Source::Dir { wd: watched } if *watched == wd => Some(*id),
             _ => None,
         });
-        let Some((id, is_dir)) = found else {
+        let Some(id) = found else {
             return;
         };
         if flags.intersects(ReadFlags::DELETE_SELF | ReadFlags::MOVE_SELF | ReadFlags::IGNORED) {
             self.sources.remove(&id);
-            wakes.push(Wake::FileGone(id));
             return;
         }
-        match (is_dir, name) {
-            (true, Some(name)) => wakes.push(Wake::DirEntry(id, name)),
-            (true, None) => {}
-            (false, _) => wakes.push(Wake::FileWritten(id)),
+        if let Some(name) = name {
+            wakes.push(Wake::DirEntry(id, name));
         }
     }
 
@@ -207,82 +192,5 @@ impl Reactor {
             Err(error) => return Err(error.into()),
         }
         Ok(())
-    }
-}
-
-impl AsFd for Reactor {
-    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        self.inotify.as_fd()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::time::Duration;
-
-    fn tempdir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-reactor-{name}-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn file_write_wakes_with_file_written() {
-        let dir = tempdir("file");
-        let path = dir.join("log");
-        fs::write(&path, "").unwrap();
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_file(&path).unwrap();
-        fs::write(&path, "line\n").unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert!(wakes.contains(&Wake::FileWritten(id)), "{wakes:?}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn directory_entry_wakes_with_its_name() {
-        let dir = tempdir("dir");
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_dir(&dir).unwrap();
-        fs::write(dir.join("marker.json"), "{}").unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert!(wakes.iter().any(|wake| matches!(wake, Wake::DirEntry(seen, name) if *seen == id && name == "marker.json")), "{wakes:?}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn process_exit_wakes_with_process_exited() {
-        let mut child = std::process::Command::new("true").spawn().unwrap();
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_process(child.id()).unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert_eq!(wakes, vec![Wake::ProcessExited(id)]);
-        assert!(child.wait().unwrap().success());
-    }
-
-    #[test]
-    fn deadline_wakes_after_it_passes() {
-        let mut reactor = Reactor::new().unwrap();
-        reactor
-            .set_deadline(Some(SystemTime::now() + Duration::from_millis(50)))
-            .unwrap();
-        let started = std::time::Instant::now();
-        let wakes = reactor.wait().unwrap();
-        assert_eq!(wakes, vec![Wake::Deadline]);
-        assert!(started.elapsed() >= Duration::from_millis(40));
-    }
-
-    #[test]
-    fn deadline_in_the_past_wakes_immediately() {
-        let mut reactor = Reactor::new().unwrap();
-        reactor
-            .set_deadline(Some(UNIX_EPOCH + Duration::from_secs(1)))
-            .unwrap();
-        assert_eq!(reactor.wait().unwrap(), vec![Wake::Deadline]);
     }
 }

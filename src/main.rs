@@ -14,7 +14,6 @@ mod install_retry_limit;
 mod ledger;
 mod limit_detect;
 mod log;
-mod log_tail;
 mod logs;
 mod mux;
 mod notify;

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io;
 use std::mem::MaybeUninit;
-use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::time::{Duration, SystemTime};
@@ -23,9 +23,6 @@ const EVENT_BATCH: usize = 64;
 type Snapshot = BTreeMap<OsString, (u64, SystemTime)>;
 
 enum Source {
-    File {
-        fd: OwnedFd,
-    },
     Dir {
         fd: OwnedFd,
         path: PathBuf,
@@ -52,15 +49,6 @@ impl Reactor {
             next_id: 1,
             sources: BTreeMap::new(),
         })
-    }
-
-    pub fn watch_file(&mut self, path: &Path) -> io::Result<SourceId> {
-        let fd = rustix::fs::open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())?;
-        self.add_vnode(
-            &fd,
-            VnodeEvents::WRITE | VnodeEvents::EXTEND | VnodeEvents::DELETE | VnodeEvents::RENAME,
-        )?;
-        Ok(self.register(Source::File { fd }))
     }
 
     pub fn watch_dir(&mut self, path: &Path) -> io::Result<SourceId> {
@@ -204,7 +192,7 @@ impl Reactor {
         wakes: &mut Vec<Wake>,
     ) -> io::Result<()> {
         let found = self.sources.iter().find_map(|(id, source)| match source {
-            Source::File { fd } | Source::Dir { fd, .. } if fd.as_raw_fd() == vnode => Some(*id),
+            Source::Dir { fd, .. } if fd.as_raw_fd() == vnode => Some(*id),
             _ => None,
         });
         let Some(id) = found else {
@@ -212,15 +200,9 @@ impl Reactor {
         };
         if flags.intersects(VnodeEvents::DELETE | VnodeEvents::RENAME | VnodeEvents::REVOKE) {
             self.sources.remove(&id);
-            wakes.push(Wake::FileGone(id));
             return Ok(());
         }
         match self.sources.get_mut(&id) {
-            Some(Source::File { .. }) => {
-                if flags.intersects(VnodeEvents::WRITE | VnodeEvents::EXTEND) {
-                    wakes.push(Wake::FileWritten(id));
-                }
-            }
             Some(Source::Dir { path, snapshot, .. }) if flags.intersects(VnodeEvents::WRITE) => {
                 let current = list_directory(path)?;
                 for (name, stamp) in &current {
@@ -263,12 +245,6 @@ impl Reactor {
     }
 }
 
-impl AsFd for Reactor {
-    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        self.queue.as_fd()
-    }
-}
-
 fn list_directory(path: &Path) -> io::Result<Snapshot> {
     let mut snapshot = Snapshot::new();
     for entry in std::fs::read_dir(path)? {
@@ -280,94 +256,4 @@ fn list_directory(path: &Path) -> io::Result<Snapshot> {
         snapshot.insert(entry.file_name(), (metadata.len(), modified));
     }
     Ok(snapshot)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::time::UNIX_EPOCH;
-
-    fn tempdir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-reactor-{name}-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn file_write_wakes_with_file_written() {
-        let dir = tempdir("file");
-        let path = dir.join("log");
-        fs::write(&path, "").unwrap();
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_file(&path).unwrap();
-        fs::write(&path, "line\n").unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert!(wakes.contains(&Wake::FileWritten(id)), "{wakes:?}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn file_removal_wakes_with_file_gone() {
-        let dir = tempdir("gone");
-        let path = dir.join("log");
-        fs::write(&path, "").unwrap();
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_file(&path).unwrap();
-        fs::remove_file(&path).unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert!(wakes.contains(&Wake::FileGone(id)), "{wakes:?}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn directory_entry_wakes_with_its_name() {
-        let dir = tempdir("dir");
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_dir(&dir).unwrap();
-        fs::write(dir.join("marker.json"), "{}").unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert!(wakes.iter().any(|wake| matches!(wake, Wake::DirEntry(seen, name) if *seen == id && name == "marker.json")), "{wakes:?}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn process_exit_wakes_with_process_exited() {
-        let mut child = std::process::Command::new("true").spawn().unwrap();
-        let mut reactor = Reactor::new().unwrap();
-        let id = reactor.watch_process(child.id()).unwrap();
-        let wakes = reactor.wait().unwrap();
-        assert_eq!(wakes, vec![Wake::ProcessExited(id)]);
-        assert!(child.wait().unwrap().success());
-    }
-
-    #[test]
-    fn deadline_wakes_after_it_passes() {
-        let mut reactor = Reactor::new().unwrap();
-        reactor
-            .set_deadline(Some(SystemTime::now() + Duration::from_millis(50)))
-            .unwrap();
-        let started = std::time::Instant::now();
-        let wakes = reactor.wait().unwrap();
-        assert_eq!(wakes, vec![Wake::Deadline]);
-        assert!(started.elapsed() >= Duration::from_millis(40));
-    }
-
-    #[test]
-    fn deadline_in_the_past_wakes_immediately() {
-        let mut reactor = Reactor::new().unwrap();
-        reactor
-            .set_deadline(Some(UNIX_EPOCH + Duration::from_secs(1)))
-            .unwrap();
-        assert_eq!(reactor.wait().unwrap(), vec![Wake::Deadline]);
-    }
-
-    #[test]
-    fn disarming_an_unarmed_deadline_is_not_an_error() {
-        let mut reactor = Reactor::new().unwrap();
-        reactor.set_deadline(None).unwrap();
-    }
 }

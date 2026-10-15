@@ -301,7 +301,10 @@ fn verify_delivery(
             "{}: {} session opened in {}",
             item.cwd.display(),
             item.agent.name(),
-            item.pane.as_ref().map(|p| p.label()).unwrap_or_default()
+            item.pane
+                .as_ref()
+                .map(|p| p.to_string())
+                .unwrap_or_default()
         ),
         false,
     );

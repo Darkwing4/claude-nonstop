@@ -66,49 +66,32 @@ impl Multiplexer for Tmux {
         };
         Self::run(&["send-keys", "-t", id, name]).map(|_| ())
     }
-
-    fn open_window(
-        &self,
-        session: &str,
-        cwd: &std::path::Path,
-        argv: &[std::ffi::OsString],
-    ) -> Result<PaneAddress> {
-        Tmux::open_window_in(session, cwd, argv)
-    }
 }
 
 impl Tmux {
-    pub fn open_window_in(
+    pub fn open_window(
         session: &str,
         cwd: &std::path::Path,
         argv: &[std::ffi::OsString],
     ) -> Result<PaneAddress> {
-        let cwd_text = cwd.display().to_string();
         let has_session = Self::run(&["has-session", "-t", session]).is_ok();
         let mut args: Vec<String> = if has_session {
-            vec![
-                "new-window".into(),
-                "-t".into(),
-                format!("{session}:"),
-                "-c".into(),
-                cwd_text,
-                "-P".into(),
-                "-F".into(),
-                "#{pane_id}".into(),
-            ]
+            vec!["new-window".into(), "-t".into(), format!("{session}:")]
         } else {
             vec![
                 "new-session".into(),
                 "-d".into(),
                 "-s".into(),
                 session.into(),
-                "-c".into(),
-                cwd_text,
-                "-P".into(),
-                "-F".into(),
-                "#{pane_id}".into(),
             ]
         };
+        args.extend([
+            "-c".into(),
+            cwd.display().to_string(),
+            "-P".into(),
+            "-F".into(),
+            "#{pane_id}".into(),
+        ]);
         args.push("--".into());
         for arg in argv {
             args.push(arg.to_string_lossy().into_owned());

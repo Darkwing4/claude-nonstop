@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::ledger::SessionRecord;
 use crate::log;
-use crate::mux::{self, Multiplexer, PaneAddress};
+use crate::mux::{self, PaneAddress};
 use crate::pane_input::Typing;
 use crate::paths::Paths;
 use crate::platform::process::spawn_detached;
@@ -101,8 +101,8 @@ pub fn launch_argv(
 
 pub fn open_in(target: Where, cwd: &std::path::Path, argv: &[OsString]) -> Result<PaneAddress> {
     match target {
-        Where::Tmux => mux::tmux::Tmux.open_window(RESUME_SESSION, cwd, argv),
-        Where::Zellij => mux::zellij::Zellij.open_window(RESUME_SESSION, cwd, argv),
+        Where::Tmux => mux::tmux::Tmux::open_window(RESUME_SESSION, cwd, argv),
+        Where::Zellij => mux::zellij::Zellij::open_window(RESUME_SESSION, cwd, argv),
         Where::Headless => Err(Error::Invalid(
             "headless launches do not open windows".to_owned(),
         )),

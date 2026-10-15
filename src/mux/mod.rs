@@ -37,14 +37,6 @@ impl PaneAddress {
         None
     }
 
-    pub fn label(&self) -> String {
-        match self {
-            PaneAddress::Tmux { pane_id } => format!("tmux {pane_id}"),
-            PaneAddress::Zellij { session, pane_id } => format!("zellij {session}#{pane_id}"),
-            PaneAddress::Headless { pid } => format!("headless pid {pid}"),
-        }
-    }
-
     pub fn is_headless(&self) -> bool {
         matches!(self, PaneAddress::Headless { .. })
     }
@@ -52,7 +44,11 @@ impl PaneAddress {
 
 impl std::fmt::Display for PaneAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.label())
+        match self {
+            PaneAddress::Tmux { pane_id } => write!(f, "tmux {pane_id}"),
+            PaneAddress::Zellij { session, pane_id } => write!(f, "zellij {session}#{pane_id}"),
+            PaneAddress::Headless { pid } => write!(f, "headless pid {pid}"),
+        }
     }
 }
 
@@ -69,16 +65,6 @@ pub trait Multiplexer {
     fn capture(&self, pane: &PaneAddress, full: bool) -> Result<String>;
     fn send_text(&self, pane: &PaneAddress, text: &str) -> Result<()>;
     fn send_key(&self, pane: &PaneAddress, key: Key) -> Result<()>;
-    fn open_window(
-        &self,
-        session: &str,
-        _cwd: &std::path::Path,
-        _argv: &[std::ffi::OsString],
-    ) -> Result<PaneAddress> {
-        Err(crate::error::Error::Invalid(format!(
-            "cannot open a window in {session} with this driver"
-        )))
-    }
 }
 
 pub fn for_pane(pane: &PaneAddress) -> Box<dyn Multiplexer> {
@@ -87,10 +73,6 @@ pub fn for_pane(pane: &PaneAddress) -> Box<dyn Multiplexer> {
         PaneAddress::Tmux { .. } => Box::new(tmux::Tmux),
         PaneAddress::Headless { .. } => Box::new(headless::Headless),
     }
-}
-
-pub fn env_map() -> BTreeMap<String, String> {
-    std::env::vars().collect()
 }
 
 #[cfg(test)]

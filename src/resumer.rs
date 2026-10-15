@@ -647,7 +647,7 @@ pub fn display_name(
     cwd: &Path,
 ) -> String {
     let fallback = pane
-        .map(|pane| pane.label())
+        .map(|pane| pane.to_string())
         .unwrap_or_else(|| cwd.display().to_string());
     if session.is_empty() {
         fallback

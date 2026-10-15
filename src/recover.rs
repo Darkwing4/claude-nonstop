@@ -40,7 +40,7 @@ impl Context<'_> {
     }
 
     fn display_name(&self) -> String {
-        crate::claude_sessions::display_name(self.paths, self.session_id, &self.pane.label())
+        crate::claude_sessions::display_name(self.paths, self.session_id, &self.pane.to_string())
     }
 
     pub fn stream_cut(&self, error: &str) -> Result<()> {
@@ -305,7 +305,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
         Step::GiveUp { episode } => {
             write_overload(paths, report, &episode, Status::Failed, now)?;
             let name =
-                crate::claude_sessions::display_name(paths, session_id, &report.pane.label());
+                crate::claude_sessions::display_name(paths, session_id, &report.pane.to_string());
             let outcome = notify::send(
                 &config.notify,
                 "claude-nonstop: gave up",

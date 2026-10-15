@@ -30,17 +30,12 @@ impl PaneRow {
 
 impl Zellij {
     fn action(session: &str, args: &[&str]) -> Result<String> {
-        let mut command = Command::new("zellij");
+        let mut command = zellij_command();
         command
             .arg("--session")
             .arg(session)
             .arg("action")
             .args(args);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ZELLIJ") {
-                command.env_remove(name);
-            }
-        }
         run_checked(&mut command, ACTION_TIMEOUT)
     }
 
@@ -52,10 +47,9 @@ impl Zellij {
     }
 
     fn row(pane: &PaneAddress) -> Result<Option<PaneRow>> {
-        let (session, pane_id) = Self::parts(pane)?;
-        let wanted = pane_id
-            .parse::<u32>()
-            .map_err(|_| Error::Invalid(format!("pane id {pane_id} is not a number")))?;
+        let PaneAddress::Zellij { session, pane_id } = pane else {
+            return Err(Error::Invalid(format!("{pane} is not a zellij pane")));
+        };
 
         if !Self::session_running(session)? {
             return Ok(None);
@@ -67,19 +61,14 @@ impl Zellij {
         })?;
         Ok(rows
             .into_iter()
-            .find(|row| row.id == wanted && !row.is_plugin))
+            .find(|row| row.id == *pane_id && !row.is_plugin))
     }
 }
 
 impl Zellij {
     fn list_sessions(flag: &str) -> Result<String> {
-        let mut command = Command::new("zellij");
+        let mut command = zellij_command();
         command.arg("list-sessions").arg(flag);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ZELLIJ") {
-                command.env_remove(name);
-            }
-        }
         let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
             .map_err(|source| Error::command("zellij", source.to_string()))?;
         match outcome {
@@ -100,22 +89,17 @@ impl Zellij {
         Ok(is_running_in(&listing, session))
     }
 
-    fn open_window_in(
+    pub fn open_window(
         session: &str,
         cwd: &std::path::Path,
         argv: &[std::ffi::OsString],
     ) -> Result<PaneAddress> {
         if !Self::session_exists(session)? {
-            let mut command = Command::new("zellij");
+            let mut command = zellij_command();
             command.arg("attach").arg("-b").arg("-c").arg(session);
-            for (name, _) in std::env::vars_os() {
-                if name.to_string_lossy().starts_with("ZELLIJ") {
-                    command.env_remove(name);
-                }
-            }
             run_checked(&mut command, ACTION_TIMEOUT)?;
         }
-        let mut command = Command::new("zellij");
+        let mut command = zellij_command();
         command
             .arg("--session")
             .arg(session)
@@ -126,11 +110,6 @@ impl Zellij {
             .arg("--")
             .arg("/usr/bin/env");
         command.args(argv);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("ZELLIJ") {
-                command.env_remove(name);
-            }
-        }
         let stdout = run_checked(&mut command, ACTION_TIMEOUT)?;
         let pane_id = stdout
             .trim()
@@ -183,15 +162,16 @@ impl Multiplexer for Zellij {
         args.extend_from_slice(bytes);
         Self::action(session, &args).map(|_| ())
     }
+}
 
-    fn open_window(
-        &self,
-        session: &str,
-        cwd: &std::path::Path,
-        argv: &[std::ffi::OsString],
-    ) -> Result<PaneAddress> {
-        Zellij::open_window_in(session, cwd, argv)
+fn zellij_command() -> Command {
+    let mut command = Command::new("zellij");
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("ZELLIJ") {
+            command.env_remove(name);
+        }
     }
+    command
 }
 
 fn is_running_in(listing: &str, session: &str) -> bool {

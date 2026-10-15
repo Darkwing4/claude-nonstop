@@ -103,7 +103,7 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
         payload.last_assistant_message.as_deref(),
         &config.overload,
     );
-    let Some(pane) = PaneAddress::from_env(&mux::env_map()) else {
+    let Some(pane) = PaneAddress::from_env(&std::env::vars().collect()) else {
         log::line(
             &session_id,
             format!("hook: {error} outside any pane, nothing to type into"),

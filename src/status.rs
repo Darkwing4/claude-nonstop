@@ -67,7 +67,7 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
         ));
         let mut details = Vec::new();
         if let Some(pane) = &record.pane {
-            details.push(pane.label());
+            details.push(pane.to_string());
         }
         details.push(format!("via {:?}", record.detected_via).to_lowercase());
         if record.is_open() {

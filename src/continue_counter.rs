@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic_file;
 use crate::error::{Error, Result};
-use crate::ledger::now_unix;
 use crate::paths::Paths;
 use crate::transcript_claude;
 

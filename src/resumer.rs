@@ -602,7 +602,7 @@ fn leave_to_user(paths: &Paths, config: &Config, record: &SessionRecord) -> Resu
         &format!("{name}: limit reset, auto_resume is off, run claude-nonstop resume-now"),
         true,
     );
-    ledger::cas(paths, &record.key, &[Status::Stopped], None, |current| {
+    ledger::cas(paths, &record.key, &[Status::Stopped], |current| {
         current.status = Status::Failed;
         current.last_error = Some("auto_resume is off, waiting for resume-now".to_owned());
     })?;

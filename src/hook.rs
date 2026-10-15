@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::ledger::{AgentId, DetectedVia};
 use crate::log;
-use crate::mux::{self, PaneAddress};
+use crate::mux::PaneAddress;
 use crate::paths::Paths;
 use crate::recover;
 

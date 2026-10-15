@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, Value};
@@ -181,9 +182,10 @@ impl Overload {
         ]
         .iter()
         .any(|pattern| lowered.contains(pattern))
-            || self.message_contains.iter().any(|pattern| {
-                !pattern.trim().is_empty() && lowered.contains(&pattern.to_ascii_lowercase())
-            })
+            || self
+                .message_contains
+                .iter()
+                .any(|pattern| lowered.contains(&pattern.to_ascii_lowercase()))
     }
 }
 
@@ -239,15 +241,7 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
         .into_iter()
         .map(|key| (key, ValueSource::Default))
         .collect();
-    if let Some(bytes) = atomic_file::read_optional(&paths.config_file)? {
-        let text = String::from_utf8(bytes).map_err(|_| Error::Toml {
-            path: paths.config_file.clone(),
-            detail: "not valid UTF-8".to_owned(),
-        })?;
-        let file_doc = text.parse::<DocumentMut>().map_err(|error| Error::Toml {
-            path: paths.config_file.clone(),
-            detail: error.to_string(),
-        })?;
+    if let Some(file_doc) = read_document(&paths.config_file)? {
         for key in flat_keys(file_doc.as_table(), "") {
             if !sources.contains_key(&key) {
                 return Err(Error::Toml {
@@ -277,8 +271,8 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
             .ok_or_else(|| Error::Invalid(format!("{name}: unknown configuration key")))?;
         let template = lookup(defaults.as_table(), &key)
             .and_then(Item::as_value)
-            .cloned();
-        let value = parse_env_value(raw, template.as_ref())
+            .ok_or_else(|| Error::Invalid(format!("{name}: unknown configuration key")))?;
+        let value = parse_env_value(raw, template)
             .map_err(|detail| Error::Invalid(format!("{name}: {detail}")))?;
         set_value(merged.as_table_mut(), &key, value);
         sources.insert(key, ValueSource::Env);
@@ -295,23 +289,10 @@ pub fn set(paths: &Paths, key: &str, raw: &str) -> Result<()> {
     let defaults = defaults_document()?;
     let template = lookup(defaults.as_table(), key)
         .and_then(Item::as_value)
-        .cloned()
         .ok_or_else(|| Error::Invalid(format!("unknown configuration key {key}")))?;
-    let value = parse_env_value(raw, Some(&template))
+    let value = parse_env_value(raw, template)
         .map_err(|detail| Error::Invalid(format!("{key}: {detail}")))?;
-    let mut doc = match atomic_file::read_optional(&paths.config_file)? {
-        Some(bytes) => {
-            let text = String::from_utf8(bytes).map_err(|_| Error::Toml {
-                path: paths.config_file.clone(),
-                detail: "not valid UTF-8".to_owned(),
-            })?;
-            text.parse::<DocumentMut>().map_err(|error| Error::Toml {
-                path: paths.config_file.clone(),
-                detail: error.to_string(),
-            })?
-        }
-        None => DocumentMut::new(),
-    };
+    let mut doc = read_document(&paths.config_file)?.unwrap_or_default();
     set_value(doc.as_table_mut(), key, value);
     let candidate: Config = toml_edit::de::from_document(doc.clone())
         .map_err(|error| Error::Invalid(format!("{key}: {error}")))?;
@@ -394,23 +375,22 @@ fn validate(config: &Config) -> Result<()> {
                 .to_owned(),
         ));
     }
-    for (agent, settings) in [("claude", &config.agents.claude)] {
-        for (name, text) in [
-            ("resume_message", &settings.resume_message),
-            ("cutoff_message", &settings.cutoff_message),
-            ("overload_message", &settings.overload_message),
-        ] {
-            if text.trim().is_empty() {
-                return Err(Error::Invalid(format!(
-                    "agents.{agent}.{name} must not be empty"
-                )));
-            }
-            let lowered = text.to_ascii_lowercase();
-            if let Some(word) = DETECTOR_WORDS.iter().find(|word| lowered.contains(*word)) {
-                return Err(Error::Invalid(format!(
-                    "agents.{agent}.{name} must not contain \"{word}\": the agent echoes it into the input line where detectors read it"
-                )));
-            }
+    let claude = &config.agents.claude;
+    for (name, text) in [
+        ("resume_message", &claude.resume_message),
+        ("cutoff_message", &claude.cutoff_message),
+        ("overload_message", &claude.overload_message),
+    ] {
+        if text.trim().is_empty() {
+            return Err(Error::Invalid(format!(
+                "agents.claude.{name} must not be empty"
+            )));
+        }
+        let lowered = text.to_ascii_lowercase();
+        if let Some(word) = DETECTOR_WORDS.iter().find(|word| lowered.contains(*word)) {
+            return Err(Error::Invalid(format!(
+                "agents.claude.{name} must not contain \"{word}\": the agent echoes it into the input line where detectors read it"
+            )));
         }
     }
     if !config.notify.ntfy_topic.is_empty() && !config.notify.ntfy_server.starts_with("http") {
@@ -419,6 +399,22 @@ fn validate(config: &Config) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn read_document(path: &Path) -> Result<Option<DocumentMut>> {
+    let Some(bytes) = atomic_file::read_optional(path)? else {
+        return Ok(None);
+    };
+
+    let text = String::from_utf8(bytes).map_err(|_| Error::Toml {
+        path: path.to_path_buf(),
+        detail: "not valid UTF-8".to_owned(),
+    })?;
+    let doc = text.parse::<DocumentMut>().map_err(|error| Error::Toml {
+        path: path.to_path_buf(),
+        detail: error.to_string(),
+    })?;
+    Ok(Some(doc))
 }
 
 fn defaults_document() -> Result<DocumentMut> {
@@ -492,19 +488,19 @@ fn set_value(table: &mut Table, key: &str, value: Value) {
     }
 }
 
-fn parse_env_value(raw: &str, template: Option<&Value>) -> std::result::Result<Value, String> {
+fn parse_env_value(raw: &str, template: &Value) -> std::result::Result<Value, String> {
     match template {
-        Some(Value::Boolean(_)) => match raw.trim().to_ascii_lowercase().as_str() {
+        Value::Boolean(_) => match raw.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "on" | "yes" => Ok(Value::from(true)),
             "0" | "false" | "off" | "no" => Ok(Value::from(false)),
             other => Err(format!("expected a boolean, got {other:?}")),
         },
-        Some(Value::Integer(_)) => raw
+        Value::Integer(_) => raw
             .trim()
             .parse::<i64>()
             .map(Value::from)
             .map_err(|_| format!("expected an integer, got {raw:?}")),
-        Some(Value::Array(array)) => {
+        Value::Array(array) => {
             let integer_elements = array.iter().next().is_some_and(|first| first.is_integer());
             let mut items = toml_edit::Array::new();
             for part in raw
@@ -523,9 +519,8 @@ fn parse_env_value(raw: &str, template: Option<&Value>) -> std::result::Result<V
             }
             Ok(Value::Array(items))
         }
-        Some(Value::String(_)) => Ok(Value::from(raw)),
-        Some(other) => Err(format!("unsupported value type {}", other.type_name())),
-        None => Err("unknown key".to_owned()),
+        Value::String(_) => Ok(Value::from(raw)),
+        other => Err(format!("unsupported value type {}", other.type_name())),
     }
 }
 

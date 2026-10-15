@@ -1,7 +1,8 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use jiff::civil::{Date, DateTime, Weekday};
+use jiff::civil::{Date, Time, Weekday};
+use jiff::fmt::strtime;
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 use regex::{Captures, Regex};
@@ -23,12 +24,17 @@ pub enum WallDate {
 pub enum ResetSpec {
     Wall {
         date: WallDate,
-        hour: u8,
-        minute: u8,
-        ambiguous: bool,
+        clock: Clock,
         tz: Option<TimeZone>,
     },
     Relative(Duration),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Clock {
+    pub hour: u8,
+    pub minute: u8,
+    pub ambiguous: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,26 +110,21 @@ static DURATION_UNIT_AHEAD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&pattern).expect("duration unit ahead regex")
 });
 
-struct Clock {
-    hour: u8,
-    minute: u8,
-    ambiguous: bool,
-}
-
 pub fn parse_reset(text: &str) -> Option<ResetSpec> {
-    parse_retry_banner(text)
+    parse_relative(&RETRY_BANNER, text)
         .or_else(|| parse_try_again_at_date(text))
         .or_else(|| parse_try_again_at_clock(text))
         .or_else(|| parse_resets_month_day(text))
         .or_else(|| parse_resets_clock(text))
         .or_else(|| parse_resets_weekday(text))
-        .or_else(|| parse_resets_in(text))
-        .or_else(|| parse_wait_for(text))
+        .or_else(|| parse_relative(&RESETS_IN, text))
+        .or_else(|| parse_relative(&WAIT_FOR, text))
 }
 
-fn parse_retry_banner(text: &str) -> Option<ResetSpec> {
-    let captures = RETRY_BANNER.captures(text)?;
-    relative_from_capture(&captures, 1)
+fn parse_relative(pattern: &Regex, text: &str) -> Option<ResetSpec> {
+    let captures = pattern.captures(text)?;
+    let duration = parse_duration(capture(&captures, 1)?)?;
+    Some(ResetSpec::Relative(duration))
 }
 
 fn parse_try_again_at_date(text: &str) -> Option<ResetSpec> {
@@ -136,15 +137,15 @@ fn parse_try_again_at_date(text: &str) -> Option<ResetSpec> {
         capture(&captures, 5),
         capture(&captures, 6),
     )?;
-    Some(wall(
-        WallDate::MonthDay {
+    Some(ResetSpec::Wall {
+        date: WallDate::MonthDay {
             month,
             day,
             year: Some(year),
         },
         clock,
-        None,
-    ))
+        tz: None,
+    })
 }
 
 fn parse_try_again_at_clock(text: &str) -> Option<ResetSpec> {
@@ -154,24 +155,32 @@ fn parse_try_again_at_clock(text: &str) -> Option<ResetSpec> {
         capture(&captures, 2),
         capture(&captures, 3),
     )?;
-    Some(wall(WallDate::Today, clock, None))
+    Some(ResetSpec::Wall {
+        date: WallDate::Today,
+        clock,
+        tz: None,
+    })
 }
 
 fn parse_resets_month_day(text: &str) -> Option<ResetSpec> {
     let captures = RESETS_MONTH_DAY.captures(text)?;
     let month = month_number(capture(&captures, 1)?)?;
     let day = day_number(capture(&captures, 2)?)?;
-    let year = match capture(&captures, 3) {
-        Some(raw_year) => Some(raw_year.parse::<i16>().ok()?),
-        None => None,
-    };
+    let year = capture(&captures, 3)
+        .map(str::parse::<i16>)
+        .transpose()
+        .ok()?;
     let clock = clock_from_parts(
         capture(&captures, 4)?,
         capture(&captures, 5),
         capture(&captures, 6),
     )?;
     let tz = zone_from_capture(capture(&captures, 7))?;
-    Some(wall(WallDate::MonthDay { month, day, year }, clock, tz))
+    Some(ResetSpec::Wall {
+        date: WallDate::MonthDay { month, day, year },
+        clock,
+        tz,
+    })
 }
 
 fn parse_resets_clock(text: &str) -> Option<ResetSpec> {
@@ -191,7 +200,7 @@ fn parse_resets_clock(text: &str) -> Option<ResetSpec> {
         capture(&captures, 4),
     )?;
     let tz = zone_from_capture(capture(&captures, 5))?;
-    Some(wall(date, clock, tz))
+    Some(ResetSpec::Wall { date, clock, tz })
 }
 
 fn parse_resets_weekday(text: &str) -> Option<ResetSpec> {
@@ -202,46 +211,22 @@ fn parse_resets_weekday(text: &str) -> Option<ResetSpec> {
         minute: 0,
         ambiguous: false,
     };
-    Some(wall(WallDate::Weekday(weekday), midnight, None))
-}
-
-fn parse_resets_in(text: &str) -> Option<ResetSpec> {
-    let captures = RESETS_IN.captures(text)?;
-    relative_from_capture(&captures, 1)
-}
-
-fn parse_wait_for(text: &str) -> Option<ResetSpec> {
-    let captures = WAIT_FOR.captures(text)?;
-    relative_from_capture(&captures, 1)
+    Some(ResetSpec::Wall {
+        date: WallDate::Weekday(weekday),
+        clock: midnight,
+        tz: None,
+    })
 }
 
 fn capture<'t>(captures: &Captures<'t>, index: usize) -> Option<&'t str> {
     captures.get(index).map(|m| m.as_str())
 }
 
-fn relative_from_capture(captures: &Captures<'_>, index: usize) -> Option<ResetSpec> {
-    let duration = parse_duration(capture(captures, index)?)?;
-    Some(ResetSpec::Relative(duration))
-}
-
-fn wall(date: WallDate, clock: Clock, tz: Option<TimeZone>) -> ResetSpec {
-    ResetSpec::Wall {
-        date,
-        hour: clock.hour,
-        minute: clock.minute,
-        ambiguous: clock.ambiguous,
-        tz,
-    }
-}
-
 fn zone_from_capture(raw_zone: Option<&str>) -> Option<Option<TimeZone>> {
-    match raw_zone {
-        Some(name) => Some(Some(TimeZone::get(name).ok()?)),
-        None => Some(None),
-    }
+    raw_zone.map(TimeZone::get).transpose().ok()
 }
 
-fn clock_from_parts(
+pub fn clock_from_parts(
     raw_hour: &str,
     raw_minute: Option<&str>,
     meridiem: Option<&str>,
@@ -283,47 +268,18 @@ fn clock_from_parts(
 }
 
 fn month_number(name: &str) -> Option<i8> {
-    let prefix = name.get(..3)?.to_ascii_lowercase();
-    let month = match prefix.as_str() {
-        "jan" => 1,
-        "feb" => 2,
-        "mar" => 3,
-        "apr" => 4,
-        "may" => 5,
-        "jun" => 6,
-        "jul" => 7,
-        "aug" => 8,
-        "sep" => 9,
-        "oct" => 10,
-        "nov" => 11,
-        "dec" => 12,
-        _ => return None,
-    };
-    Some(month)
+    let abbreviation = name.get(..3)?;
+    strtime::parse("%b", abbreviation).ok()?.month()
 }
 
 fn day_number(raw_day: &str) -> Option<i8> {
     let day: i8 = raw_day.parse().ok()?;
-    if (1..=31).contains(&day) {
-        Some(day)
-    } else {
-        None
-    }
+    (1..=31).contains(&day).then_some(day)
 }
 
 fn weekday_from_name(name: &str) -> Option<Weekday> {
-    let prefix = name.get(..3)?.to_ascii_lowercase();
-    let weekday = match prefix.as_str() {
-        "mon" => Weekday::Monday,
-        "tue" => Weekday::Tuesday,
-        "wed" => Weekday::Wednesday,
-        "thu" => Weekday::Thursday,
-        "fri" => Weekday::Friday,
-        "sat" => Weekday::Saturday,
-        "sun" => Weekday::Sunday,
-        _ => return None,
-    };
-    Some(weekday)
+    let abbreviation = name.get(..3)?;
+    strtime::parse("%a", abbreviation).ok()?.weekday()
 }
 
 pub fn parse_duration(text: &str) -> Option<Duration> {
@@ -434,25 +390,14 @@ pub fn resolve(
                 Err(_) => fallback,
             }
         }
-        ResetSpec::Wall {
-            date,
-            hour,
-            minute,
-            ambiguous,
-            tz,
-        } => {
+        ResetSpec::Wall { date, clock, tz } => {
             let tz = tz.as_ref().unwrap_or(host_tz);
             let anchor = banner_at.unwrap_or(now);
-            let clock = Clock {
-                hour: *hour,
-                minute: *minute,
-                ambiguous: *ambiguous,
-            };
             let wall_at = match date {
-                WallDate::Today => resolve_today(tz, &clock, anchor, banner_at.is_some(), now),
-                WallDate::Weekday(weekday) => resolve_weekday(tz, &clock, *weekday, anchor),
+                WallDate::Today => resolve_today(tz, clock, anchor, banner_at.is_some(), now),
+                WallDate::Weekday(weekday) => resolve_weekday(tz, clock, *weekday, anchor),
                 WallDate::MonthDay { month, day, year } => {
-                    resolve_month_day(tz, &clock, *month, *day, *year, anchor, now)
+                    resolve_month_day(tz, clock, *month, *day, *year, anchor, now)
                 }
             };
             let Some(wall_at) = wall_at else {
@@ -484,18 +429,11 @@ pub fn stale_five_hour_clamp(at: Timestamp, detected_at: Timestamp, margin: Dura
     }
 }
 
-fn civil_instant(tz: &TimeZone, date: Date, hour: u8, minute: u8) -> Option<Timestamp> {
-    let datetime = DateTime::new(
-        date.year(),
-        date.month(),
-        date.day(),
-        hour as i8,
-        minute as i8,
-        0,
-        0,
-    )
-    .ok()?;
-    tz.to_ambiguous_timestamp(datetime).later().ok()
+pub fn civil_instant(tz: &TimeZone, date: Date, hour: u8, minute: u8) -> Option<Timestamp> {
+    let time = Time::new(hour as i8, minute as i8, 0, 0).ok()?;
+    tz.to_ambiguous_timestamp(date.to_datetime(time))
+        .later()
+        .ok()
 }
 
 fn hour_candidates(clock: &Clock) -> Vec<u8> {
@@ -891,9 +829,11 @@ mod tests {
             spec,
             Some(ResetSpec::Wall {
                 date: WallDate::Weekday(Weekday::Monday),
-                hour: 0,
-                minute: 0,
-                ambiguous: false,
+                clock: Clock {
+                    hour: 0,
+                    minute: 0,
+                    ambiguous: false,
+                },
                 tz: None,
             })
         );
@@ -902,9 +842,11 @@ mod tests {
             spec,
             Some(ResetSpec::Wall {
                 date: WallDate::Weekday(Weekday::Sunday),
-                hour: 0,
-                minute: 0,
-                ambiguous: false,
+                clock: Clock {
+                    hour: 0,
+                    minute: 0,
+                    ambiguous: false,
+                },
                 tz: None,
             })
         );
@@ -913,9 +855,11 @@ mod tests {
             spec,
             Some(ResetSpec::Wall {
                 date: WallDate::Today,
-                hour: 3,
-                minute: 0,
-                ambiguous: true,
+                clock: Clock {
+                    hour: 3,
+                    minute: 0,
+                    ambiguous: true,
+                },
                 tz: None,
             })
         );
@@ -928,9 +872,11 @@ mod tests {
                     day: 1,
                     year: Some(2026)
                 },
-                hour: 0,
-                minute: 0,
-                ambiguous: false,
+                clock: Clock {
+                    hour: 0,
+                    minute: 0,
+                    ambiguous: false,
+                },
                 tz: Some(zone("UTC")),
             })
         );
@@ -940,6 +886,34 @@ mod tests {
             Some(ResetSpec::Relative(Duration::from_secs(180)))
         );
         assert_eq!(parse_reset("resets 13pm"), None);
+    }
+
+    #[test]
+    fn month_and_weekday_names_parse_in_every_spelling() {
+        for name in ["Sep", "sept", "Sept.", "SEPTEMBER", "september"] {
+            let spec = parse_reset(&format!("resets {name} 1 at 9am"));
+            let Some(ResetSpec::Wall { date, .. }) = spec else {
+                panic!("{name}: {spec:?}");
+            };
+            let expected = WallDate::MonthDay {
+                month: 9,
+                day: 1,
+                year: None,
+            };
+            assert_eq!(date, expected, "{name}");
+        }
+        for name in ["Thu", "thur", "Thurs", "THURSDAY"] {
+            let spec = parse_reset(&format!("resets {name} 9am"));
+            let Some(ResetSpec::Wall { date, .. }) = spec else {
+                panic!("{name}: {spec:?}");
+            };
+            assert_eq!(date, WallDate::Weekday(Weekday::Thursday), "{name}");
+        }
+        let spec = parse_reset("resets tues");
+        let Some(ResetSpec::Wall { date, .. }) = spec else {
+            panic!("{spec:?}");
+        };
+        assert_eq!(date, WallDate::Weekday(Weekday::Tuesday));
     }
 
     #[test]
@@ -1025,9 +999,11 @@ mod tests {
                 .unwrap();
             let spec = ResetSpec::Wall {
                 date: WallDate::Today,
-                hour,
-                minute,
-                ambiguous,
+                clock: Clock {
+                    hour,
+                    minute,
+                    ambiguous,
+                },
                 tz: Some(tz),
             };
             let resolved = resolve(Some(&spec), now, None, &host, MARGIN, PROBE);

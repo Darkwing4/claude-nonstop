@@ -53,10 +53,6 @@ fn main() {
 fn run(cli: Cli) -> Result<i32> {
     let paths = Paths::from_env()?;
     match cli.command {
-        Command::Version => {
-            println!("claude-nonstop {}", env!("CARGO_PKG_VERSION"));
-            Ok(0)
-        }
         Command::Daemon => {
             paths.ensure_state_dirs()?;
             log::init(paths.log_file(), "daemon", true);

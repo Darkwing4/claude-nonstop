@@ -85,8 +85,6 @@ pub enum Command {
     Resumer,
     #[command(about = "Run the resumer in the foreground and watch transcripts of every session")]
     Daemon,
-    #[command(about = "Print the version")]
-    Version,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

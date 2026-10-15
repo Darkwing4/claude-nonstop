@@ -5,6 +5,10 @@
 ### Removed
 
 - `notify.channel` and notifications over terminal OSC and bell: they were never delivered. An existing `notify.channel` setting is ignored.
+- `version` subcommand: use `claude-nonstop --version`.
+- `name`, `mux_session`, `manual` and `env` keys of sessions and `mux_session` of prompts in `status --json` and `prompt list --json`. A session touched by `resume-now` now has `"reset_source": "manual"` instead of `"manual": true`.
+- `SHA256SUMS` release asset: every archive still has its own `.sha256`.
+- `install.sh` no longer accepts `uname -m` = `arm64` and no longer falls back to `shasum` when `sha256sum` is missing.
 
 ### Fixed
 

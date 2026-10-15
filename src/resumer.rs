@@ -198,6 +198,9 @@ fn dispatch(
     if probing_allowed(config, record) {
         return probe(paths, config, record, transcript.as_deref());
     }
+    if !config.general.auto_resume && record.reset_source != ResetSource::Manual {
+        return leave_to_user(paths, config, record);
+    }
     if record.attempts >= config.limit.max_attempts {
         let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
         let outcome = notify::send(
@@ -590,6 +593,26 @@ fn probing_allowed(config: &Config, record: &SessionRecord) -> bool {
     record.reset_source == ResetSource::Fallback && now_unix() < deadline
 }
 
+fn leave_to_user(paths: &Paths, config: &Config, record: &SessionRecord) -> Result<()> {
+    let session = record.session_id.clone().unwrap_or_default();
+    let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
+    let outcome = notify::send(
+        &config.notify,
+        "claude-nonstop: needs you",
+        &format!("{name}: limit reset, auto_resume is off, run claude-nonstop resume-now"),
+        true,
+    );
+    ledger::cas(paths, &record.key, &[Status::Stopped], None, |current| {
+        current.status = Status::Failed;
+        current.last_error = Some("auto_resume is off, waiting for resume-now".to_owned());
+    })?;
+    log::line(
+        &session,
+        format!("limit reset, auto_resume is off, left to the user ({outcome})"),
+    );
+    Ok(())
+}
+
 fn live_pane(record: &SessionRecord) -> Result<Option<PaneAddress>> {
     match &record.pane {
         Some(pane) if !pane.is_headless() && mux::for_pane(pane).pane_alive(pane)? => {
@@ -656,5 +679,52 @@ mod tests {
         assert_eq!(backoff(5), 960);
         assert_eq!(backoff(6), 1800);
         assert_eq!(backoff(40), 1800);
+    }
+
+    #[test]
+    fn auto_resume_off_leaves_the_reset_limit_to_resume_now() {
+        let dir = std::env::temp_dir().join(format!("nonstop-auto-resume-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = Paths {
+            home: dir.clone(),
+            state: dir.clone(),
+            config_file: dir.join("config.toml"),
+            claude_config: dir.join("claude"),
+        };
+        let mut config = Config::default();
+        config.general.auto_resume = false;
+        config.notify.enabled = false;
+        let mut verify_at = BTreeMap::new();
+
+        for (key, reset_source) in [
+            ("auto", ResetSource::Absolute),
+            ("manual", ResetSource::Manual),
+        ] {
+            let record = SessionRecord {
+                key: key.to_owned(),
+                cwd: dir.clone(),
+                status: Status::Stopped,
+                stop: StopKind::UsageLimit,
+                reset_source,
+                attempts: config.limit.max_attempts,
+                ..SessionRecord::default()
+            };
+            ledger::update(&paths, |book| {
+                book.sessions.insert(key.to_owned(), record.clone());
+            })
+            .unwrap();
+            dispatch(&paths, &config, &record, &mut verify_at).unwrap();
+        }
+
+        let book = ledger::read(&paths).unwrap();
+        let held = &book.sessions["auto"];
+        let gave_up = format!("{} attempts without progress", config.limit.max_attempts);
+        assert_eq!(held.status, Status::Failed);
+        assert_eq!(
+            held.last_error.as_deref(),
+            Some("auto_resume is off, waiting for resume-now")
+        );
+        assert_eq!(book.sessions["manual"].last_error, Some(gave_up));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

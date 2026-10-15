@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `general.auto_resume = false` is no longer ignored: once a usage limit resets, the session waits for `resume-now` instead of being resumed.
+
 ## [0.1.0] - 2026-10-15
 
 ### Added

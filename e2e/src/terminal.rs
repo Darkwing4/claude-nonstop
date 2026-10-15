@@ -18,6 +18,15 @@ pub enum Multiplexer {
     Zellij,
 }
 
+impl Multiplexer {
+    pub fn name(self) -> &'static str {
+        match self {
+            Multiplexer::Tmux => "tmux",
+            Multiplexer::Zellij => "zellij",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pane {
     pub multiplexer: Multiplexer,

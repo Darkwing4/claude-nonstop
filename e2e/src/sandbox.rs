@@ -18,6 +18,11 @@ const API_KEY: &str = "sk-ant-api03-e2e-mock-key-0000000000000000000000000000AAA
 const OAUTH_TOKEN: &str = "sk-ant-oat01-e2e-mock-token-00000000000000000000000000BBBB";
 const TIME_ZONE: &str = "Asia/Bangkok";
 const DUMPED_HOOK_EVENTS: &[&str] = &["SessionStart", "Stop", "StopFailure"];
+const CREDENTIAL_ENV: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_SUBSCRIPTION_TYPE",
+];
 const KILL_GRACE: Duration = Duration::from_secs(10);
 const SANDBOX_NAME_LIMIT: usize = 40;
 
@@ -42,6 +47,7 @@ pub struct SandboxConfig {
     pub auth: Auth,
     pub env: Vec<(String, String)>,
     pub fake_commands: BTreeMap<String, FakeBehavior>,
+    pub login_in_settings: bool,
 }
 
 impl Default for SandboxConfig {
@@ -55,6 +61,7 @@ impl Default for SandboxConfig {
             auth: Auth::ApiKey,
             env: Vec::new(),
             fake_commands,
+            login_in_settings: false,
         }
     }
 }
@@ -112,6 +119,10 @@ impl Sandbox {
         sandbox.install_binaries(&config.fake_commands);
         sandbox.write_claude_state(config.auth);
         sandbox.write_hook_dumpers();
+
+        if config.login_in_settings {
+            sandbox.write_login_to_settings();
+        }
 
         sandbox
     }
@@ -305,6 +316,31 @@ impl Sandbox {
         wait_for_exits(&exits);
     }
 
+    pub fn claude_pid(&self, session_id: &str) -> Option<u32> {
+        list_dir(&self.claude_config.join("sessions"))
+            .into_iter()
+            .filter(|path| path.extension() == Some(OsStr::new("json")))
+            .filter_map(|path| read_text(&path))
+            .filter_map(|text| serde_json::from_str::<Value>(&text).ok())
+            .find(|entry| entry["sessionId"] == session_id)
+            .and_then(|entry| entry["pid"].as_u64())
+            .and_then(|pid| u32::try_from(pid).ok())
+    }
+
+    pub fn is_running(&self, command_line: &str) -> bool {
+        self.own_processes().into_iter().any(|pid| {
+            let cmdline = std::fs::read(format!("/proc/{}/cmdline", pid.as_raw_nonzero()))
+                .unwrap_or_default();
+            let words: Vec<String> = cmdline
+                .split(|byte| *byte == 0)
+                .filter(|word| !word.is_empty())
+                .map(|word| String::from_utf8_lossy(word).into_owned())
+                .collect();
+
+            words.join(" ").contains(command_line)
+        })
+    }
+
     pub fn kill_processes(&self) {
         loop {
             let victims = self.own_processes();
@@ -463,6 +499,19 @@ impl Sandbox {
         write_json(&self.claude_config.join(".claude.json"), &state);
     }
 
+    fn write_login_to_settings(&self) {
+        let credentials: serde_json::Map<String, Value> = self
+            .env
+            .iter()
+            .filter(|(key, _)| CREDENTIAL_ENV.contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), Value::from(value.as_str())))
+            .collect();
+        let mut settings = self.settings();
+        settings["env"] = Value::Object(credentials);
+
+        self.write_settings(&settings);
+    }
+
     fn write_hook_dumpers(&self) {
         let dumper = self.bin.join("hook-dump").display().to_string();
         let hooks: serde_json::Map<String, Value> = DUMPED_HOOK_EVENTS
@@ -483,6 +532,27 @@ impl Drop for Sandbox {
         if let Err(error) = std::fs::remove_dir_all(&self.root) {
             eprintln!("e2e: sandbox {} not removed: {error}", self.root.display());
         }
+    }
+}
+
+pub fn process_exits_within(pid: u32, timeout: Duration) -> bool {
+    let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) else {
+        panic!("{pid} is not a process id");
+    };
+    let exit = match pidfd_open(pid, PidfdFlags::empty()) {
+        Ok(fd) => fd,
+        Err(Errno::SRCH) => return true,
+        Err(error) => panic!("pidfd_open {pid:?} failed: {error}"),
+    };
+    let timeout = Timespec {
+        tv_sec: timeout.as_secs() as i64,
+        tv_nsec: i64::from(timeout.subsec_nanos()),
+    };
+    let mut fds = [PollFd::new(&exit, PollFlags::IN)];
+
+    match poll(&mut fds, Some(&timeout)) {
+        Ok(ready) => ready == 1,
+        Err(error) => panic!("waiting for {pid:?} to exit failed: {error}"),
     }
 }
 

@@ -70,3 +70,11 @@ scenario.wait_for_log("resume 1/3 written to", TURN);
 - `claude-nonstop` runs with `LIMIT_MARGIN_SECONDS=0`, `LIMIT_VERIFY_SECONDS=1`,
   `OVERLOAD_BACKOFF_SECONDS=1,2`, `OVERLOAD_JITTER_PERCENT=0`; anything else goes
   through `.env(..)`. An unknown `CLAUDE_NONSTOP_*` variable breaks every command.
+- Claude Code does not pass `CLAUDE_CODE_OAUTH_TOKEN` to its hooks, so a
+  subscription Claude Code that claude-nonstop starts from a hook's resumer (a
+  reopened session, a queued prompt) is not logged in. `.login_in_settings()`
+  also stores the credentials in the `env` of `settings.json`, the way a real
+  login outlives the environment.
+- Scenarios that wait out claude-nonstop's fixed delays (the 60 s retry backoff
+  and longer) have `slow` right after the matrix id, `f3_slow_…`:
+  `e2e/run.sh --skip slow` leaves them out, `e2e/run.sh slow` runs only them.

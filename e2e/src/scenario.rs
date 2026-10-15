@@ -7,8 +7,10 @@ use serde_json::Value;
 use crate::artifacts::{self, PreserveOnPanic};
 use crate::events::Waiter;
 use crate::mock_api::{MockApi, Reply, Request};
-use crate::sandbox::{Auth, FakeBehavior, HookCall, Notification, Sandbox, SandboxConfig};
-use crate::terminal::{Key, Multiplexer, Pane, Screen, Terminal};
+use crate::sandbox::{
+    Auth, FakeBehavior, HookCall, Notification, Sandbox, SandboxConfig, process_exits_within,
+};
+use crate::terminal::{Key, ListedPane, Multiplexer, Pane, Screen, Terminal};
 
 pub const STARTUP: Duration = Duration::from_secs(60);
 pub const TURN: Duration = Duration::from_secs(60);
@@ -45,6 +47,11 @@ impl ScenarioBuilder {
 
     pub fn fallback_reply(mut self, reply: Reply) -> Self {
         self.fallback = Some(reply);
+        self
+    }
+
+    pub fn login_in_settings(mut self) -> Self {
+        self.config.login_in_settings = true;
         self
     }
 
@@ -126,10 +133,26 @@ impl Scenario {
         self.launch_claude_under(&[], extra_args)
     }
 
+    pub fn launch_claude_outside_multiplexer(&mut self) -> Pane {
+        let multiplexer_env: &[&str] = match self.terminal.multiplexer() {
+            Multiplexer::Tmux => &["TMUX", "TMUX_PANE"],
+            Multiplexer::Zellij => &["ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"],
+        };
+        let mut env_without = vec!["env"];
+        for name in multiplexer_env {
+            env_without.extend(["-u", name]);
+        }
+
+        self.launch_claude_under(&env_without, &[])
+    }
+
     pub fn launch_claude_under(&mut self, wrapper: &[&str], extra_args: &[&str]) -> Pane {
         let starts_before = self.sandbox.hooks_of("SessionStart").len();
-        let mut argv: Vec<String> = wrapper.iter().map(|arg| (*arg).to_owned()).collect();
-        argv.extend(self.sandbox.claude_argv(extra_args));
+        let argv: Vec<String> = wrapper
+            .iter()
+            .map(|word| (*word).to_owned())
+            .chain(self.sandbox.claude_argv(extra_args))
+            .collect();
         let pane = self.terminal.launch(&self.sandbox.workdir, &argv);
         self.claude = Some(pane.clone());
 
@@ -141,6 +164,30 @@ impl Scenario {
         );
 
         pane
+    }
+
+    pub fn adopt_claude(&mut self, pane: Pane) {
+        self.terminal.follow(&pane);
+        self.claude = Some(pane);
+    }
+
+    pub fn pane_at(&self, address: &Value) -> Option<ListedPane> {
+        let is_addressed = |pane: &Pane| match address["mux"].as_str() {
+            Some("tmux") => {
+                pane.multiplexer == Multiplexer::Tmux && address["pane_id"] == pane.id.as_str()
+            }
+            Some("zellij") => {
+                pane.multiplexer == Multiplexer::Zellij
+                    && address["session"] == pane.session.as_str()
+                    && address["pane_id"].as_u64() == pane.id.parse().ok()
+            }
+            _ => false,
+        };
+
+        self.terminal
+            .panes()
+            .into_iter()
+            .find(|listed| is_addressed(&listed.pane))
     }
 
     pub fn claude(&self) -> &Pane {
@@ -297,6 +344,14 @@ impl Scenario {
                 .ledger_session(session_id)
                 .filter(|record| matches(record))
         })
+    }
+
+    pub fn wait_for_exit(&self, what: &str, pid: u32, timeout: Duration) {
+        assert!(
+            process_exits_within(pid, timeout),
+            "timed out after {}s waiting for {what} (pid {pid}) to exit",
+            timeout.as_secs()
+        );
     }
 
     pub fn wait_for_notification(&self, title: &str, timeout: Duration) -> Notification {

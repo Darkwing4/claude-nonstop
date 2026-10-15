@@ -100,7 +100,6 @@ pub fn record(paths: &Paths, session_id: &str, transcript: &Path, count: u32) ->
 }
 
 fn sweep(paths: &Paths) -> Result<()> {
-    let deadline = now_unix().saturating_sub(TTL.as_secs());
     for entry in std::fs::read_dir(dir(paths))
         .map_err(|source| Error::io(dir(paths), "read", source))?
         .flatten()
@@ -109,8 +108,8 @@ fn sweep(paths: &Paths) -> Result<()> {
             .metadata()
             .and_then(|meta| meta.modified())
             .ok()
-            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
-            .is_some_and(|age| age.as_secs() < deadline);
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > TTL);
         if stale {
             if let Err(error) = std::fs::remove_file(entry.path()) {
                 crate::log::line(

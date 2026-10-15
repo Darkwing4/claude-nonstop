@@ -381,7 +381,7 @@ fn version_of(program: &str, args: &[&str]) -> Option<(u32, u32)> {
 fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     let mut command = Command::new(program);
     command.args(args);
-    match run_with_timeout(&mut command, PROBE_TIMEOUT) {
+    match run_with_timeout(&mut command, None, PROBE_TIMEOUT) {
         Ok(CommandOutcome::Finished { status, stdout, .. }) if status.success() => Some(stdout),
         Ok(_) | Err(_) => None,
     }

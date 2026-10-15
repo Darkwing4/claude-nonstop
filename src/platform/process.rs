@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, SystemTime};
@@ -70,27 +70,45 @@ pub fn wait_timeout(child: &mut Child, timeout: Duration) -> io::Result<Option<E
     }
 }
 
-pub fn run_with_timeout(command: &mut Command, timeout: Duration) -> io::Result<CommandOutcome> {
+pub fn run_with_timeout(
+    command: &mut Command,
+    input: Option<&[u8]>,
+    timeout: Duration,
+) -> io::Result<CommandOutcome> {
+    let stdin = if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    };
     command
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn()?;
-    match wait_timeout(&mut child, timeout)? {
+    let input_written = match (child.stdin.take(), input) {
+        (Some(mut pipe), Some(bytes)) => pipe.write_all(bytes),
+        _ => Ok(()),
+    };
+
+    let outcome = match wait_timeout(&mut child, timeout)? {
         Some(status) => {
             let output = child.wait_with_output()?;
-            Ok(CommandOutcome::Finished {
+            CommandOutcome::Finished {
                 status,
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            })
+            }
         }
         None => {
             child.kill()?;
             child.wait()?;
-            Ok(CommandOutcome::TimedOut)
+            CommandOutcome::TimedOut
         }
-    }
+    };
+
+    input_written
+        .map_err(|error| io::Error::new(error.kind(), format!("stdin write failed: {error}")))?;
+    Ok(outcome)
 }
 
 #[derive(Debug)]
@@ -157,12 +175,19 @@ mod tests {
 
     #[test]
     fn run_with_timeout_captures_output_or_kills() {
-        match run_with_timeout(Command::new("echo").arg("hi"), Duration::from_secs(5)).unwrap() {
+        match run_with_timeout(Command::new("echo").arg("hi"), None, Duration::from_secs(5))
+            .unwrap()
+        {
             CommandOutcome::Finished { stdout, .. } => assert_eq!(stdout, "hi\n"),
             CommandOutcome::TimedOut => panic!("echo timed out"),
         }
         assert!(matches!(
-            run_with_timeout(Command::new("sleep").arg("5"), Duration::from_millis(50)).unwrap(),
+            run_with_timeout(
+                Command::new("sleep").arg("5"),
+                None,
+                Duration::from_millis(50)
+            )
+            .unwrap(),
             CommandOutcome::TimedOut
         ));
     }

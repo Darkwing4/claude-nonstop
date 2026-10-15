@@ -41,7 +41,7 @@ impl Zellij {
                 command.env_remove(name);
             }
         }
-        let outcome = run_with_timeout(&mut command, ACTION_TIMEOUT)
+        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
             .map_err(|source| Error::command("zellij", source.to_string()))?;
         match outcome {
             CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),
@@ -100,7 +100,7 @@ impl Zellij {
                 command.env_remove(name);
             }
         }
-        let outcome = run_with_timeout(&mut command, ACTION_TIMEOUT)
+        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
             .map_err(|source| Error::command("zellij", source.to_string()))?;
         match outcome {
             CommandOutcome::Finished { stdout, .. } => Ok(stdout),
@@ -133,7 +133,7 @@ impl Zellij {
                     command.env_remove(name);
                 }
             }
-            match run_with_timeout(&mut command, ACTION_TIMEOUT)
+            match run_with_timeout(&mut command, None, ACTION_TIMEOUT)
                 .map_err(|source| Error::command("zellij", source.to_string()))?
             {
                 CommandOutcome::Finished { status, stderr, .. } if !status.success() => {
@@ -170,7 +170,7 @@ impl Zellij {
                 command.env_remove(name);
             }
         }
-        let outcome = run_with_timeout(&mut command, ACTION_TIMEOUT)
+        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
             .map_err(|source| Error::command("zellij", source.to_string()))?;
         let stdout = match outcome {
             CommandOutcome::Finished { status, stdout, .. } if status.success() => stdout,

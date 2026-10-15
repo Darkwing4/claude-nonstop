@@ -134,7 +134,7 @@ pub fn is_active() -> Option<bool> {
 fn control(program: &str, args: &[&str]) -> Result<String> {
     let mut command = Command::new(program);
     command.args(args);
-    match run_with_timeout(&mut command, CONTROL_TIMEOUT)
+    match run_with_timeout(&mut command, None, CONTROL_TIMEOUT)
         .map_err(|source| Error::command(program, source.to_string()))?
     {
         CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),

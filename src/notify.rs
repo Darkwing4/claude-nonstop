@@ -1,9 +1,9 @@
-use std::io::{self, Write};
-use std::process::{Child, Command, Stdio};
+use std::io;
+use std::process::Command;
 use std::time::Duration;
 
 use crate::config::{Notify, NtfyPrivacy};
-use crate::platform::process::{CommandOutcome, run_with_timeout, wait_timeout};
+use crate::platform::process::{CommandOutcome, run_with_timeout};
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const NTFY_TIMEOUT: Duration = Duration::from_secs(6);
@@ -47,7 +47,7 @@ fn native(title: &str, body: &str, urgent: bool) -> String {
             .arg(body);
         command
     };
-    describe_outcome(run_with_timeout(&mut command, SEND_TIMEOUT))
+    describe_outcome(run_with_timeout(&mut command, None, SEND_TIMEOUT))
 }
 
 fn ntfy(settings: &Notify, title: &str, body: &str, urgent: bool) -> String {
@@ -69,7 +69,8 @@ fn ntfy(settings: &Notify, title: &str, body: &str, urgent: bool) -> String {
             .arg(format!("Authorization: Bearer {}", settings.ntfy_token));
     }
     command.arg("--data").arg("@-").arg(server);
-    describe_outcome(run_with_input(&mut command, &payload, NTFY_TIMEOUT))
+    let outcome = run_with_timeout(&mut command, Some(payload.as_bytes()), NTFY_TIMEOUT);
+    describe_outcome(outcome)
 }
 
 fn ntfy_message(body: &str, privacy: NtfyPrivacy) -> String {
@@ -97,55 +98,6 @@ fn describe_outcome(outcome: io::Result<CommandOutcome>) -> String {
         }
         Ok(CommandOutcome::TimedOut) => "timed out".to_owned(),
         Err(error) => format!("not started: {error}"),
-    }
-}
-
-fn run_with_input(
-    command: &mut Command,
-    input: &str,
-    timeout: Duration,
-) -> io::Result<CommandOutcome> {
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn()?;
-    let input_result = match child.stdin.take() {
-        Some(mut stdin) => stdin.write_all(input.as_bytes()),
-        None => Ok(()),
-    };
-    let outcome = finish_child(&mut child, timeout)?;
-    match input_result {
-        Ok(()) => Ok(outcome),
-        Err(error) => Err(io::Error::new(
-            error.kind(),
-            format!("stdin write failed: {error}"),
-        )),
-    }
-}
-
-fn finish_child(child: &mut Child, timeout: Duration) -> io::Result<CommandOutcome> {
-    match wait_timeout(child, timeout)? {
-        Some(status) => {
-            let mut stdout = String::new();
-            let mut stderr = String::new();
-            if let Some(mut pipe) = child.stdout.take() {
-                io::Read::read_to_string(&mut pipe, &mut stdout)?;
-            }
-            if let Some(mut pipe) = child.stderr.take() {
-                io::Read::read_to_string(&mut pipe, &mut stderr)?;
-            }
-            Ok(CommandOutcome::Finished {
-                status,
-                stdout,
-                stderr,
-            })
-        }
-        None => {
-            child.kill()?;
-            child.wait()?;
-            Ok(CommandOutcome::TimedOut)
-        }
     }
 }
 

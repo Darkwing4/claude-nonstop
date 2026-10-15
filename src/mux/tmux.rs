@@ -13,7 +13,7 @@ impl Tmux {
     fn run(args: &[&str]) -> Result<String> {
         let mut command = Command::new("tmux");
         command.args(args);
-        let outcome = run_with_timeout(&mut command, ACTION_TIMEOUT)
+        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
             .map_err(|source| Error::command("tmux", source.to_string()))?;
         match outcome {
             CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),

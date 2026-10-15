@@ -209,18 +209,6 @@ fn mode_of(path: &Path) -> u32 {
 mod tests {
     use super::*;
 
-    fn paths_in(name: &str) -> Paths {
-        let dir =
-            std::env::temp_dir().join(format!("claude-nonstop-hook-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join(".claude")).unwrap();
-        Paths {
-            home: dir.clone(),
-            state: dir.join("state"),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        }
-    }
-
     const EXISTING: &str = r#"{
   "permissions": {
     "defaultMode": "auto"
@@ -263,7 +251,7 @@ mod tests {
 
     #[test]
     fn install_appends_our_group_keeps_others_and_is_idempotent() {
-        let paths = paths_in("append");
+        let paths = Paths::temp("install-hook-append");
         let settings = paths.claude_settings();
         std::fs::write(&settings, EXISTING).unwrap();
         install(&paths, Path::new("/usr/local/bin/claude-nonstop")).unwrap();
@@ -302,7 +290,7 @@ mod tests {
 
     #[test]
     fn install_keeps_a_customized_hook_command() {
-        let paths = paths_in("custom");
+        let paths = Paths::temp("install-hook-custom");
         let settings = paths.claude_settings();
         let custom =
             "if test -f /run/policy; then audit nonstop; else /bin/claude-nonstop hook; fi";
@@ -322,7 +310,7 @@ mod tests {
 
     #[test]
     fn missing_settings_file_is_created_and_fully_removed_on_uninstall() {
-        let paths = paths_in("fresh");
+        let paths = Paths::temp("install-hook-fresh");
         let settings = paths.claude_settings();
         install(&paths, Path::new("/bin/claude-nonstop")).unwrap();
         let (map, _) = read_settings(&settings).unwrap();
@@ -336,7 +324,7 @@ mod tests {
 
     #[test]
     fn invalid_json_is_refused_untouched() {
-        let paths = paths_in("invalid");
+        let paths = Paths::temp("install-hook-invalid");
         let settings = paths.claude_settings();
         std::fs::write(&settings, "{not json").unwrap();
         assert!(install(&paths, Path::new("/bin/claude-nonstop")).is_err());

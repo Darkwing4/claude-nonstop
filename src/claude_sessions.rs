@@ -115,25 +115,12 @@ fn transcript_title(path: &Path) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn paths_in(name: &str) -> Paths {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-sessions-{name}-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(dir.join(".claude/sessions")).unwrap();
-        fs::create_dir_all(dir.join(".claude/projects/-home-me-proj")).unwrap();
-        Paths {
-            home: dir.clone(),
-            state: dir.join("state"),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        }
-    }
-
     #[test]
     fn pid_lookup_and_name_resolution_order() {
-        let paths = paths_in("names");
+        let paths = Paths::temp("sessions-names");
         let sessions = paths.claude_sessions_dir();
+        fs::create_dir_all(&sessions).unwrap();
+        fs::create_dir_all(paths.claude_projects_dir().join("-home-me-proj")).unwrap();
         fs::write(sessions.join("100.json"), r#"{"pid":100,"sessionId":"s-custom","cwd":"/home/me/proj","name":"My task","nameSource":"custom"}"#).unwrap();
         fs::write(sessions.join("101.json"), r#"{"pid":101,"sessionId":"s-derived","cwd":"/home/me/proj","name":"proj-1a","nameSource":"derived"}"#).unwrap();
         fs::write(sessions.join("102.key"), "not json").unwrap();

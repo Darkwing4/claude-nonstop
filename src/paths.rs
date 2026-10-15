@@ -64,6 +64,19 @@ impl Paths {
         self.claude_config.join("projects")
     }
 
+    #[cfg(test)]
+    pub fn temp(name: &str) -> Paths {
+        let home = env::temp_dir().join(format!("claude-nonstop-{name}-{}", std::process::id()));
+        let paths = Paths {
+            home: home.clone(),
+            state: home.join("state"),
+            config_file: home.join("config.toml"),
+            claude_config: home.join(".claude"),
+        };
+        std::fs::create_dir_all(&paths.claude_config).unwrap();
+        paths
+    }
+
     pub fn ensure_state_dirs(&self) -> Result<()> {
         for dir in [self.state.clone(), self.headless_dir(), self.log_dir()] {
             create_private_dir(&dir)?;

@@ -177,28 +177,15 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn paths_in(name: &str) -> Paths {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-twatch-{name}-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(dir.join(".claude/projects/-home-me-proj")).unwrap();
-        Paths {
-            home: dir.clone(),
-            state: dir.join("state"),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        }
-    }
-
     fn limit_line(stamp: &str) -> String {
         serde_json::json!({"type":"assistant","timestamp":stamp,"sessionId":"s-1","cwd":"/home/me/proj","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 5:30pm (Asia/Bangkok)"}]}}).to_string() + "\n"
     }
 
     #[test]
     fn only_records_written_after_start_are_reported() {
-        let paths = paths_in("new");
+        let paths = Paths::temp("twatch-new");
         let dir = paths.claude_projects_dir().join("-home-me-proj");
+        std::fs::create_dir_all(&dir).unwrap();
         let transcript = dir.join("s-1.jsonl");
         std::fs::write(&transcript, limit_line("2026-09-03T06:00:00.000Z")).unwrap();
         let mut reactor = Reactor::new().unwrap();

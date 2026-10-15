@@ -429,14 +429,8 @@ mod tests {
 
     #[test]
     fn prune_writes_only_when_expired_records_exist() {
-        let dir = std::env::temp_dir().join(format!("nonstop-prune-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let paths = Paths {
-            home: dir.clone(),
-            state: dir.clone(),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join("claude"),
-        };
+        let paths = Paths::temp("prompt-queue-prune");
+        paths.ensure_state_dirs().unwrap();
         let now = PRUNE_AFTER + 100;
         prune(&paths, now).unwrap();
         assert!(!paths.ledger().exists());
@@ -496,7 +490,7 @@ mod tests {
                 .unwrap(),
             modified
         );
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
     #[test]

@@ -683,14 +683,8 @@ mod tests {
 
     #[test]
     fn auto_resume_off_leaves_the_reset_limit_to_resume_now() {
-        let dir = std::env::temp_dir().join(format!("nonstop-auto-resume-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let paths = Paths {
-            home: dir.clone(),
-            state: dir.clone(),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join("claude"),
-        };
+        let paths = Paths::temp("resumer-auto-resume");
+        paths.ensure_state_dirs().unwrap();
         let mut config = Config::default();
         config.general.auto_resume = false;
         config.notify.enabled = false;
@@ -702,7 +696,7 @@ mod tests {
         ] {
             let record = SessionRecord {
                 key: key.to_owned(),
-                cwd: dir.clone(),
+                cwd: paths.home.clone(),
                 status: Status::Stopped,
                 stop: StopKind::UsageLimit,
                 reset_source,
@@ -725,6 +719,6 @@ mod tests {
             Some("auto_resume is off, waiting for resume-now")
         );
         assert_eq!(book.sessions["manual"].last_error, Some(gave_up));
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

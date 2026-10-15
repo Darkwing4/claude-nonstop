@@ -257,15 +257,7 @@ mod tests {
 
     #[test]
     fn other_events_and_subagents_are_ignored() {
-        let dir =
-            std::env::temp_dir().join(format!("claude-nonstop-hook-run-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let paths = Paths {
-            home: dir.clone(),
-            state: dir.join("state"),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        };
+        let paths = Paths::temp("hook-run");
         let config = Config::default();
         let mut stop = r#"{"hook_event_name":"Stop","error":"server_error"}"#.as_bytes();
         assert_eq!(run(&paths, &config, &mut stop).unwrap(), 0);
@@ -275,6 +267,6 @@ mod tests {
         let mut broken = "{".as_bytes();
         assert_eq!(run(&paths, &config, &mut broken).unwrap(), 0);
         assert!(!paths.state.exists());
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

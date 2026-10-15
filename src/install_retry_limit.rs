@@ -81,20 +81,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn paths_in(name: &str) -> Paths {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-retries-{name}-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(dir.join(".claude")).unwrap();
-        Paths {
-            home: dir.clone(),
-            state: dir.join("state"),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        }
-    }
-
     fn env_of(paths: &Paths) -> Option<Value> {
         let (settings, _) = read_settings(&paths.claude_settings()).unwrap();
         settings.get("env").cloned()
@@ -102,7 +88,7 @@ mod tests {
 
     #[test]
     fn default_is_written_once_and_a_chosen_value_is_kept() {
-        let paths = paths_in("default");
+        let paths = Paths::temp("retries-default");
         std::fs::write(
             paths.claude_settings(),
             json!({ "env": { "OTHER": "x" }, "theme": "dark" }).to_string(),
@@ -129,7 +115,7 @@ mod tests {
 
     #[test]
     fn uninstall_drops_an_env_left_empty() {
-        let paths = paths_in("empty");
+        let paths = Paths::temp("retries-empty");
         install(&paths, Some(2)).unwrap();
         uninstall(&paths).unwrap();
 
@@ -140,7 +126,7 @@ mod tests {
 
     #[test]
     fn a_non_object_env_is_refused_untouched() {
-        let paths = paths_in("broken-env");
+        let paths = Paths::temp("retries-broken-env");
         std::fs::write(paths.claude_settings(), r#"{"env":"oops"}"#).unwrap();
 
         assert!(install(&paths, Some(1)).is_err());

@@ -541,7 +541,6 @@ fn render(item: &Item) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn custom_overload_patterns_are_validated_and_preserve_builtins() {
@@ -562,28 +561,10 @@ mod tests {
         assert!(validate(&invalid).is_err());
     }
 
-    fn paths_in(dir: &std::path::Path) -> Paths {
-        Paths {
-            home: dir.to_path_buf(),
-            state: dir.join("state"),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        }
-    }
-
-    fn tempdir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-config-{name}-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn defaults_load_without_a_file() {
-        let dir = tempdir("defaults");
-        let loaded = load_from(&paths_in(&dir), &[]).unwrap();
+        let paths = Paths::temp("config-defaults");
+        let loaded = load_from(&paths, &[]).unwrap();
         assert_eq!(loaded.config.cutoff.max_in_a_row, 3);
         assert!(
             loaded
@@ -595,13 +576,12 @@ mod tests {
             get(&loaded, "notify.ntfy_server").unwrap(),
             "https://ntfy.sh"
         );
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
     #[test]
     fn file_and_env_override_in_order() {
-        let dir = tempdir("override");
-        let paths = paths_in(&dir);
+        let paths = Paths::temp("config-override");
         std::fs::write(
             &paths.config_file,
             "[cutoff]\nmax_in_a_row = 4\n\n[notify]\nntfy_privacy = \"terse\"\n",
@@ -625,13 +605,12 @@ mod tests {
         assert_eq!(loaded.sources["cutoff.max_in_a_row"], ValueSource::Env);
         assert_eq!(loaded.sources["notify.ntfy_privacy"], ValueSource::File);
         assert_eq!(loaded.sources["limit.margin_seconds"], ValueSource::Default);
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
     #[test]
     fn unknown_keys_and_bad_values_are_errors() {
-        let dir = tempdir("errors");
-        let paths = paths_in(&dir);
+        let paths = Paths::temp("config-errors");
         std::fs::write(&paths.config_file, "[notify]\nchanel = \"bell\"\n").unwrap();
         assert!(
             load_from(&paths, &[])
@@ -664,13 +643,12 @@ mod tests {
                 .to_string()
                 .contains("unknown configuration key")
         );
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
     #[test]
     fn set_keeps_comments_and_rejects_detector_words() {
-        let dir = tempdir("set");
-        let paths = paths_in(&dir);
+        let paths = Paths::temp("config-set");
         std::fs::write(
             &paths.config_file,
             "# my notes\n[general]\nauto_resume = true\n",
@@ -693,13 +671,12 @@ mod tests {
                 .to_string()
                 .contains("ntfy_privacy")
         );
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
     #[test]
     fn retired_keys_from_older_releases_are_ignored_and_dropped_on_set() {
-        let dir = tempdir("retired");
-        let paths = paths_in(&dir);
+        let paths = Paths::temp("config-retired");
         std::fs::write(&paths.config_file, "[notify]\nchannel = \"bell\"\n").unwrap();
         let env = vec![("CLAUDE_NONSTOP_NOTIFY_CHANNEL".to_owned(), "osc".to_owned())];
         let loaded = load_from(&paths, &env).unwrap();
@@ -708,14 +685,14 @@ mod tests {
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(!text.contains("channel"), "{text}");
         assert!(!load_from(&paths, &[]).unwrap().config.notify.enabled);
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
     #[test]
     fn list_covers_every_key_with_its_source() {
-        let dir = tempdir("list");
+        let paths = Paths::temp("config-list");
         let loaded = load_from(
-            &paths_in(&dir),
+            &paths,
             &[("CLAUDE_NONSTOP_NOTIFY_ENABLED".to_owned(), "0".to_owned())],
         )
         .unwrap();
@@ -732,6 +709,6 @@ mod tests {
                     && value == "[30, 60, 120, 240, 300]")
         );
         assert_eq!(rows.len(), loaded.sources.len());
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

@@ -123,24 +123,10 @@ fn sweep(paths: &Paths) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn paths_in(name: &str) -> Paths {
-        let dir = std::env::temp_dir().join(format!(
-            "claude-nonstop-counter-{name}-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Paths {
-            home: dir.clone(),
-            state: dir.clone(),
-            config_file: dir.join("config.toml"),
-            claude_config: dir.join(".claude"),
-        }
-    }
-
     #[test]
     fn counts_up_to_the_cap_and_resets_on_progress() {
-        let paths = paths_in("cap");
-        let transcript = paths.state.join("t.jsonl");
+        let paths = Paths::temp("counter-cap");
+        let transcript = paths.home.join("t.jsonl");
         let user = |text: &str| {
             serde_json::json!({"type":"user","message":{"content":text}}).to_string() + "\n"
         };
@@ -171,6 +157,6 @@ mod tests {
             Decision::Allowed { next: 1 }
         );
         assert!(evaluate(&paths, "../escape", &transcript, &prompts, 3).is_err());
-        std::fs::remove_dir_all(&paths.state).unwrap();
+        std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

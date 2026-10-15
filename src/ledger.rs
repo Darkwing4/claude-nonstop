@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustix::fs::{FlockOperation, flock};
@@ -221,14 +221,18 @@ fn quarantine(paths: &Paths, reason: String) -> Result<Ledger> {
     })
 }
 
-pub fn update<T>(paths: &Paths, change: impl FnOnce(&mut Ledger) -> T) -> Result<T> {
-    let lock_path = paths.ledger_lock();
-    let lock = OpenOptions::new()
+pub fn open_lock(path: &Path) -> Result<File> {
+    OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&lock_path)
-        .map_err(|source| Error::io(&lock_path, "open", source))?;
+        .open(path)
+        .map_err(|source| Error::io(path, "open", source))
+}
+
+pub fn update<T>(paths: &Paths, change: impl FnOnce(&mut Ledger) -> T) -> Result<T> {
+    let lock_path = paths.ledger_lock();
+    let lock = open_lock(&lock_path)?;
     flock(&lock, FlockOperation::LockExclusive)
         .map_err(|source| Error::io(&lock_path, "lock", source.into()))?;
     let mut ledger = read(paths)?;

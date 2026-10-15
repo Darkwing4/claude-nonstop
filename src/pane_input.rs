@@ -1,19 +1,27 @@
 use std::time::Duration;
 
-use crate::agent::Agent;
+use crate::agent::{self, Agent, AgentId};
 use crate::error::{Error, Result};
-use crate::mux::{Key, Multiplexer, PaneAddress};
+use crate::mux::{self, Key, Multiplexer, PaneAddress};
 use crate::screen;
 
 pub const SUBMIT_GAP: Duration = Duration::from_millis(150);
 
 pub struct Typing<'a> {
-    pub mux: &'a dyn Multiplexer,
+    pub mux: Box<dyn Multiplexer>,
     pub pane: &'a PaneAddress,
-    pub agent: &'a dyn Agent,
+    pub agent: Box<dyn Agent>,
 }
 
-impl Typing<'_> {
+impl<'a> Typing<'a> {
+    pub fn new(pane: &'a PaneAddress, agent: AgentId) -> Self {
+        Typing {
+            mux: mux::for_pane(pane),
+            pane,
+            agent: agent::by_id(agent),
+        }
+    }
+
     pub fn ensure_alive(&self) -> Result<()> {
         if self.mux.pane_alive(self.pane)? {
             Ok(())

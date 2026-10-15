@@ -128,7 +128,6 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
                 );
                 return Ok(0);
             }
-            let mux = mux::for_pane(&pane);
             let context = recover::Context {
                 paths,
                 config,
@@ -136,11 +135,8 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
                 session_id: &session_id,
                 transcript: &transcript,
                 pane: &pane,
-                mux: mux.as_ref(),
             };
-            if let recover::Outcome::Skipped(reason) = context.stream_cut(&error)? {
-                log::line(&session_id, format!("hook: {error} not resumed: {reason}"));
-            }
+            context.stream_cut(&error)?;
         }
         HookKind::Overloaded => {
             let report = recover::OverloadReport {

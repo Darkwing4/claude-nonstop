@@ -9,7 +9,7 @@ use crate::ledger::{
 };
 use crate::limit_detect::{self, MenuRead};
 use crate::log;
-use crate::mux::{Multiplexer, PaneAddress};
+use crate::mux::PaneAddress;
 use crate::notify;
 use crate::overload_ladder::{self, Episode, Step};
 use crate::pane_input::Typing;
@@ -27,25 +27,11 @@ pub struct Context<'a> {
     pub session_id: &'a str,
     pub transcript: &'a Path,
     pub pane: &'a PaneAddress,
-    pub mux: &'a dyn Multiplexer,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Typed { count: u32 },
-    Exhausted { count: u32 },
-    Skipped(String),
 }
 
 impl Context<'_> {
-    fn settings(&self) -> &AgentConfig {
-        match self.agent {
-            AgentId::Claude => &self.config.agents.claude,
-        }
-    }
-
     fn prompts(&self) -> Vec<&str> {
-        let settings = self.settings();
+        let settings = settings_for(self.config, self.agent);
         vec![
             settings.cutoff_message.as_str(),
             settings.overload_message.as_str(),
@@ -57,10 +43,16 @@ impl Context<'_> {
         crate::claude_sessions::display_name(self.paths, self.session_id, &self.pane.label())
     }
 
-    pub fn continue_after(&self, reason: &str, message: &str) -> Result<Outcome> {
+    pub fn stream_cut(&self, error: &str) -> Result<()> {
+        let reason = format!("turn cut off ({error})");
         if self.pane.is_headless() {
-            return Ok(Outcome::Skipped(format!("{reason}: no pane to type into")));
+            log::line(
+                self.session_id,
+                format!("{reason}: no pane to type into, not resumed"),
+            );
+            return Ok(());
         }
+
         let max = self.config.cutoff.max_in_a_row;
         let decision = continue_counter::evaluate(
             self.paths,
@@ -85,21 +77,17 @@ impl Context<'_> {
                         "{reason}: {count} resumes in a row without progress, giving up ({outcome})"
                     ),
                 );
-                return Ok(Outcome::Exhausted { count });
+                return Ok(());
             }
         };
-        let agent = crate::agent::by_id(self.agent);
-        let typing = Typing {
-            mux: self.mux,
-            pane: self.pane,
-            agent: agent.as_ref(),
-        };
+        let message = &settings_for(self.config, self.agent).cutoff_message;
+        let typing = Typing::new(self.pane, self.agent);
         if let Err(error) = typing.submit(message) {
             log::line(
                 self.session_id,
                 format!("{reason}: resume to {} failed: {error}", self.pane),
             );
-            return Ok(Outcome::Skipped(error.to_string()));
+            return Ok(());
         }
         continue_counter::record(self.paths, self.session_id, self.transcript, next)?;
         let name = self.display_name();
@@ -116,12 +104,7 @@ impl Context<'_> {
                 self.pane
             ),
         );
-        Ok(Outcome::Typed { count: next })
-    }
-
-    pub fn stream_cut(&self, error: &str) -> Result<Outcome> {
-        let message = self.settings().cutoff_message.clone();
-        self.continue_after(&format!("turn cut off ({error})"), &message)
+        Ok(())
     }
 }
 
@@ -225,25 +208,13 @@ pub fn record_limit(
     })?;
     if let Some(pane) = pane {
         if config.general.menu_auto_answer && !pane.is_headless() {
-            let driver = crate::mux::for_pane(pane);
-            let driver_agent = crate::agent::by_id(agent);
-            let typing = Typing {
-                mux: driver.as_ref(),
-                pane,
-                agent: driver_agent.as_ref(),
-            };
+            let typing = Typing::new(pane, agent);
             if let Err(error) = answer_menu(&typing, session_id) {
                 log::line(session_id, format!("rate limit menu not answered: {error}"));
             }
         }
     }
-    let name = crate::claude_sessions::display_name(
-        paths,
-        session_id,
-        &pane
-            .map(|p| p.label())
-            .unwrap_or_else(|| cwd.display().to_string()),
-    );
+    let name = crate::resumer::display_name(paths, session_id, pane, cwd);
     let body = if reset_source == ResetSource::Fallback {
         format!(
             "{name}: no reset time, probing every {} min",

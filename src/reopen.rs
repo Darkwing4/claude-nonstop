@@ -1,14 +1,16 @@
 use std::ffi::OsString;
 use std::fs::OpenOptions;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::agent::{self, AgentId};
+use crate::agent::AgentId;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::ledger::SessionRecord;
 use crate::log;
 use crate::mux::{self, Multiplexer, PaneAddress};
+use crate::pane_input::Typing;
 use crate::paths::Paths;
 use crate::platform::process::spawn_detached;
 use crate::screen;
@@ -61,19 +63,23 @@ pub fn reopen(
             spawn_detached_headless(paths, &name, &record.cwd, argv)
         }
         Where::Tmux | Where::Zellij => {
-            let pane = open_in(target, &record.cwd, &argv)?;
-            let driver = mux::for_pane(&pane);
-            let agent = agent::by_id(record.agent);
-            wait_for_prompt(driver.as_ref(), &pane, agent.prompt_glyph())?;
-            let typing = crate::pane_input::Typing {
-                mux: driver.as_ref(),
-                pane: &pane,
-                agent: agent.as_ref(),
-            };
-            typing.submit(prompt)?;
-            Ok(pane)
+            start_in_pane(target, record.agent, &record.cwd, &argv, prompt)
         }
     }
+}
+
+pub fn start_in_pane(
+    target: Where,
+    agent: AgentId,
+    cwd: &Path,
+    argv: &[OsString],
+    prompt: &str,
+) -> Result<PaneAddress> {
+    let pane = open_in(target, cwd, argv)?;
+    let typing = Typing::new(&pane, agent);
+    wait_for_prompt(typing.mux.as_ref(), &pane, typing.agent.prompt_glyph())?;
+    typing.submit(prompt)?;
+    Ok(pane)
 }
 
 pub fn launch_argv(

@@ -222,15 +222,9 @@ fn launch(
     }
     match start_session(paths, config, item) {
         Ok(pane) => {
-            ledger::update(paths, |book| {
-                if let Some(current) = book
-                    .prompts
-                    .iter_mut()
-                    .find(|candidate| candidate.id == item.id)
-                {
-                    current.sent_at = Some(now_unix());
-                    current.pane = Some(pane.clone());
-                }
+            update_prompt(paths, &item.id, |current| {
+                current.sent_at = Some(now_unix());
+                current.pane = Some(pane.clone());
             })?;
             verify_at.insert(
                 item.id.clone(),
@@ -261,17 +255,7 @@ fn start_session(paths: &Paths, config: &Config, item: &QueuedPrompt) -> Result<
             reopen::spawn_detached_headless(paths, &item.id, &item.cwd, argv)
         }
         reopen::Where::Tmux | reopen::Where::Zellij => {
-            let pane = reopen::open_in(target, &item.cwd, &argv)?;
-            let driver = mux::for_pane(&pane);
-            let agent = agent::by_id(item.agent);
-            reopen::wait_for_prompt(driver.as_ref(), &pane, agent.prompt_glyph())?;
-            let typing = crate::pane_input::Typing {
-                mux: driver.as_ref(),
-                pane: &pane,
-                agent: agent.as_ref(),
-            };
-            typing.submit(&item.prompt)?;
-            Ok(pane)
+            reopen::start_in_pane(target, item.agent, &item.cwd, &argv, &item.prompt)
         }
     }
 }
@@ -306,15 +290,9 @@ fn verify_delivery(
             "hit a usage limit right after starting".to_owned(),
         );
     }
-    ledger::update(paths, |book| {
-        if let Some(current) = book
-            .prompts
-            .iter_mut()
-            .find(|candidate| candidate.id == item.id)
-        {
-            current.status = PromptStatus::Delivered;
-            current.delivered_at = Some(now_unix());
-        }
+    update_prompt(paths, &item.id, |current| {
+        current.status = PromptStatus::Delivered;
+        current.delivered_at = Some(now_unix());
     })?;
     let outcome = notify::send(
         &config.notify,
@@ -334,20 +312,14 @@ fn verify_delivery(
 fn fail_attempt(paths: &Paths, config: &Config, item: &QueuedPrompt, reason: String) -> Result<()> {
     let now = now_unix();
     let exhausted = item.attempts >= MAX_ATTEMPTS;
-    ledger::update(paths, |book| {
-        if let Some(current) = book
-            .prompts
-            .iter_mut()
-            .find(|candidate| candidate.id == item.id)
-        {
-            current.last_error = Some(reason.clone());
-            if exhausted {
-                current.status = PromptStatus::Failed;
-            } else {
-                current.status = PromptStatus::Pending;
-                current.not_before = Some(now + crate::resumer::backoff(item.attempts));
-                current.pane = None;
-            }
+    update_prompt(paths, &item.id, |current| {
+        current.last_error = Some(reason.clone());
+        if exhausted {
+            current.status = PromptStatus::Failed;
+        } else {
+            current.status = PromptStatus::Pending;
+            current.not_before = Some(now + crate::resumer::backoff(item.attempts));
+            current.pane = None;
         }
     })?;
     if exhausted {
@@ -379,16 +351,22 @@ fn fail_attempt(paths: &Paths, config: &Config, item: &QueuedPrompt, reason: Str
 }
 
 fn reclaim(paths: &Paths, item: &QueuedPrompt, reason: &str) -> Result<()> {
-    ledger::update(paths, |book| {
-        if let Some(current) = book.prompts.iter_mut().find(|candidate| {
-            candidate.id == item.id && candidate.status == PromptStatus::Launching
-        }) {
+    update_prompt(paths, &item.id, |current| {
+        if current.status == PromptStatus::Launching {
             current.status = PromptStatus::Pending;
             current.last_error = Some(reason.to_owned());
         }
     })?;
     log::line("", format!("prompt {} back to pending: {reason}", item.id));
     Ok(())
+}
+
+fn update_prompt(paths: &Paths, id: &str, change: impl FnOnce(&mut QueuedPrompt)) -> Result<()> {
+    ledger::update(paths, |book| {
+        if let Some(current) = book.prompts.iter_mut().find(|candidate| candidate.id == id) {
+            change(current);
+        }
+    })
 }
 
 fn prune(paths: &Paths, now: u64) -> Result<()> {

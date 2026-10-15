@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rustix::fs::{FlockOperation, flock};
 
-use crate::agent;
 use crate::claude_sessions;
 use crate::config::Config;
 use crate::error::{Error, Result};
@@ -13,7 +13,7 @@ use crate::ledger::{
     self, DetectedVia, ResetSource, ResumedBy, SessionRecord, Status, StopKind, now_unix,
 };
 use crate::log;
-use crate::mux;
+use crate::mux::{self, PaneAddress};
 use crate::notify;
 use crate::overload_ladder;
 use crate::pane_input::Typing;
@@ -27,18 +27,10 @@ use crate::transcript_watch::TranscriptWatch;
 const MAX_BACKOFF: u64 = 30 * 60;
 
 pub fn spawn_if_needed(paths: &Paths) -> Result<()> {
-    let lock_path = paths.resumer_lock();
-    let lock = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|source| Error::io(&lock_path, "open", source))?;
-    match flock(&lock, FlockOperation::NonBlockingLockExclusive) {
-        Ok(()) => {}
-        Err(rustix::io::Errno::WOULDBLOCK) => return Ok(()),
-        Err(source) => return Err(Error::io(&lock_path, "lock", source.into())),
-    }
+    let Some(lock) = try_lock(paths)? else {
+        return Ok(());
+    };
+
     drop(lock);
     let exe =
         std::env::current_exe().map_err(|source| Error::io("claude-nonstop", "resolve", source))?;
@@ -56,22 +48,22 @@ pub fn spawn_if_needed(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-pub fn run(paths: &Paths, config: &Config, persistent: bool) -> Result<i32> {
+fn try_lock(paths: &Paths) -> Result<Option<File>> {
     let lock_path = paths.resumer_lock();
-    let lock = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|source| Error::io(&lock_path, "open", source))?;
+    let lock = ledger::open_lock(&lock_path)?;
     match flock(&lock, FlockOperation::NonBlockingLockExclusive) {
-        Ok(()) => {}
-        Err(rustix::io::Errno::WOULDBLOCK) => {
-            log::line("", "another resumer holds the lock, exiting");
-            return Ok(0);
-        }
-        Err(source) => return Err(Error::io(&lock_path, "lock", source.into())),
+        Ok(()) => Ok(Some(lock)),
+        Err(rustix::io::Errno::WOULDBLOCK) => Ok(None),
+        Err(source) => Err(Error::io(&lock_path, "lock", source.into())),
     }
+}
+
+pub fn run(paths: &Paths, config: &Config, persistent: bool) -> Result<i32> {
+    let Some(_lock) = try_lock(paths)? else {
+        log::line("", "another resumer holds the lock, exiting");
+        return Ok(0);
+    };
+
     ledger::update(paths, |book| book.resumer_pid = Some(std::process::id()))?;
     let mut reactor = Reactor::new().map_err(|source| Error::io("reactor", "create", source))?;
     reactor
@@ -137,7 +129,6 @@ fn pass(
 ) -> Result<Option<u64>> {
     let now = now_unix();
     let book = ledger::read(paths)?;
-    let mut next: Option<u64> = None;
     for record in book.sessions.values() {
         let due = match record.status {
             Status::Stopped => record.reset_at,
@@ -153,13 +144,10 @@ fn pass(
             if let Err(error) = handled {
                 postpone(paths, record, &error, verify_at)?;
             }
-        } else {
-            next = Some(next.map_or(due, |current| current.min(due)));
         }
     }
-    if let Some(queue_next) = crate::prompt_queue::pass(paths, config, verify_at)? {
-        next = Some(next.map_or(queue_next, |current| current.min(queue_next)));
-    }
+
+    let mut next = crate::prompt_queue::pass(paths, config, verify_at)?;
     let after = ledger::read(paths)?;
     for record in after.sessions.values() {
         let due = match record.status {
@@ -207,13 +195,11 @@ fn dispatch(
             return Ok(());
         }
     }
-    if record.reset_source == ResetSource::Fallback
-        && record.probe_count < probe_ceiling(config, record)
-    {
+    if probing_allowed(config, record) {
         return probe(paths, config, record, transcript.as_deref());
     }
     if record.attempts >= config.limit.max_attempts {
-        let name = display_name(paths, &session, record);
+        let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
         let outcome = notify::send(
             &config.notify,
             "claude-nonstop: gave up",
@@ -230,28 +216,14 @@ fn dispatch(
         );
         return Ok(());
     }
-    let live_pane = match record.pane.clone() {
-        Some(pane) if !pane.is_headless() && mux::for_pane(&pane).pane_alive(&pane)? => Some(pane),
-        _ => None,
-    };
-    let Some(pane) = live_pane else {
+    let Some(pane) = live_pane(record)? else {
         return reopen_session(paths, config, record, verify_at);
     };
-    let driver = mux::for_pane(&pane);
-    let agent = agent::by_id(record.agent);
-    let typing = Typing {
-        mux: driver.as_ref(),
-        pane: &pane,
-        agent: agent.as_ref(),
-    };
+    let typing = Typing::new(&pane, record.agent);
     if config.general.menu_auto_answer {
         recover::answer_menu(&typing, &session)?;
     }
-    let message = record.resume_message.clone().unwrap_or_else(|| {
-        recover::settings_for(config, record.agent)
-            .resume_message
-            .clone()
-    });
+    let message = crate::reopen::prompt_for(config, record);
     let now = now_unix();
     match typing.submit(&message) {
         Ok(()) => {
@@ -336,7 +308,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
     let now = now_unix();
     let cap = u64::from(config.overload.max_total_minutes) * 60;
     if now.saturating_sub(record.detected_at) >= cap {
-        let name = display_name(paths, &session, record);
+        let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
         let outcome = notify::send(
             &config.notify,
             "claude-nonstop: gave up",
@@ -359,11 +331,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
         return Ok(());
     }
 
-    let live_pane = match record.pane.clone() {
-        Some(pane) if !pane.is_headless() && mux::for_pane(&pane).pane_alive(&pane)? => Some(pane),
-        _ => None,
-    };
-    let Some(pane) = live_pane else {
+    let Some(pane) = live_pane(record)? else {
         ledger::cas(paths, &key, &[Status::Stopped], |current| {
             current.status = Status::Cancelled;
             current.last_error = Some("pane is gone".to_owned());
@@ -372,13 +340,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
         return Ok(());
     };
 
-    let driver = mux::for_pane(&pane);
-    let agent = agent::by_id(record.agent);
-    let typing = Typing {
-        mux: driver.as_ref(),
-        pane: &pane,
-        agent: agent.as_ref(),
-    };
+    let typing = Typing::new(&pane, record.agent);
     let message = recover::settings_for(config, record.agent)
         .overload_message
         .clone();
@@ -390,7 +352,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
                 current.attempts += 1;
                 current.last_attempt_at = Some(now);
             })?;
-            let name = display_name(paths, &session, record);
+            let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
                 "claude-nonstop: resumed",
@@ -438,7 +400,7 @@ fn reopen_session(
     let session = record.session_id.clone().unwrap_or_default();
     if let Some(pane) = &record.pane {
         if pane.is_headless() && mux::for_pane(pane).pane_alive(pane)? {
-            let name = display_name(paths, &session, record);
+            let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
                 "claude-nonstop: needs you",
@@ -458,7 +420,7 @@ fn reopen_session(
     }
     if let Some(entry) = claude_sessions::by_session_id(paths, &session)? {
         if crate::platform::process::alive(entry.pid) {
-            let name = display_name(paths, &session, record);
+            let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
                 "claude-nonstop: needs you",
@@ -495,7 +457,7 @@ fn reopen_session(
                 current.resume_episode_at = Some(now);
             })?;
             verify_at.insert(key, now + u64::from(config.limit.verify_seconds));
-            let name = display_name(paths, &session, record);
+            let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
                 "claude-nonstop: reopened",
@@ -542,7 +504,7 @@ fn verify(
             .map_err(|source| Error::io(&path, "read", source))?
         {
             finish(paths, &key, ResumedBy::Nonstop)?;
-            let name = display_name(paths, &session, record);
+            let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
                 "claude-nonstop: resumed",
@@ -623,9 +585,18 @@ fn probe(
     Ok(())
 }
 
-fn probe_ceiling(config: &Config, record: &SessionRecord) -> u32 {
+fn probing_allowed(config: &Config, record: &SessionRecord) -> bool {
     let deadline = record.detected_at + u64::from(config.limit.fallback_hours) * 3600;
-    if now_unix() >= deadline { 0 } else { u32::MAX }
+    record.reset_source == ResetSource::Fallback && now_unix() < deadline
+}
+
+fn live_pane(record: &SessionRecord) -> Result<Option<PaneAddress>> {
+    match &record.pane {
+        Some(pane) if !pane.is_headless() && mux::for_pane(pane).pane_alive(pane)? => {
+            Ok(Some(pane.clone()))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn finish(paths: &Paths, key: &str, by: ResumedBy) -> Result<()> {
@@ -646,12 +617,15 @@ pub fn backoff(attempts: u32) -> u64 {
     (60u64 << exponent).min(MAX_BACKOFF)
 }
 
-fn display_name(paths: &Paths, session: &str, record: &SessionRecord) -> String {
-    let fallback = record
-        .pane
-        .as_ref()
+pub fn display_name(
+    paths: &Paths,
+    session: &str,
+    pane: Option<&PaneAddress>,
+    cwd: &Path,
+) -> String {
+    let fallback = pane
         .map(|pane| pane.label())
-        .unwrap_or_else(|| record.cwd.display().to_string());
+        .unwrap_or_else(|| cwd.display().to_string());
     if session.is_empty() {
         fallback
     } else {

@@ -184,7 +184,7 @@ fn e3_daemon_reads_a_project_directory_created_while_it_was_busy() {
     wait_for_transcript_limit(&scenario, "e3-marker");
     assert!(
         scenario.sandbox.ledger_session("e3-fresh").is_some(),
-        "PRODUCT BUG (found by e2e): a project directory that appears while the daemon is busy is \
+        "KNOWN BUG 7: a project directory that appears while the daemon is busy is \
          registered at its current size, so the limit already written into its first transcript is never read"
     );
 }

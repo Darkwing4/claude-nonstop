@@ -102,7 +102,7 @@ fn h3_hook_cancelled_over_a_hanging_notify_send_still_leaves_a_resumer_tmux() {
     let log = scenario.sandbox.nonstop_log();
     assert!(
         log.contains("resumer spawned"),
-        "PRODUCT BUG (found by e2e): the hook sends the limit notification before it spawns the resumer \
+        "KNOWN BUG 8: the hook sends the limit notification before it spawns the resumer \
          and gives notify-send 5 s, as long as its own hook timeout, so Claude Code cancels the hook \
          and the recorded limit is left without a resumer to wake it \
          (resumer_pid: {resumer}, claude-nonstop log: {log:?}, Claude Code: {outcome})"

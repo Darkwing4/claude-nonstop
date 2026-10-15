@@ -43,9 +43,30 @@ log. Inside:
 | `home/.claude/settings.json`, `home/.claude/projects/` | settings and transcripts |
 | `home/.local/state/claude-nonstop/` | `ledger.json`, `cutoff/`, `log/claude-nonstop.log` |
 
-A message that starts with `KNOWN BUG <n>` or `PRODUCT BUG` is the product
-misbehaving as documented, not the harness. `timed out after Ns waiting for X`
-names the event that never happened; the artifacts show how far it got.
+A message that starts with `KNOWN BUG <n>:` is the product misbehaving as
+listed in [Known product bugs](#known-product-bugs), not the harness.
+`timed out after Ns waiting for X` names the event that never happened; the
+artifacts show how far it got.
+
+## Known product bugs
+
+Scenarios are written for the right behaviour, so these bugs fail them on
+purpose; the failure message starts with `KNOWN BUG <n>:`.
+
+| # | bug | caught by |
+|---|---|---|
+| 1 | a 529 arrives as `server_error` and is continued as a cut-off turn instead of waited out as an overload | `c1_overloaded_api_is_waited_out_tmux`, `c2_overload_that_never_ends_is_given_up_tmux` |
+| 2 | `claude -p` kills the StopFailure hook on exit, so the limit of a headless run is never recorded | `f4_headless_prompt_that_hits_a_limit_records_it` |
+| 3 | Claude Code's own auto-continue races the resumer; a five-hour reset must continue exactly once | `d1_five_hour_limit_resumes_once_after_reset_tmux`, `d1_slow_five_hour_limit_resumes_once_after_reset_zellij` |
+| 4 | the reset time is read only from the transcript, not yet flushed when the hook runs; `last_assistant_message` is ignored | `d1_five_hour_limit_resumes_once_after_reset_tmux` |
+| 5 | the hook reads the pane the moment the turn ends, still sees the busy footer or the prompt just sent and gives up without a retry (flaky) | `b1_*`, `b2_*`, `b3_*`, `b4_*`, `c8_*` |
+| 6 | `general.multiplexer=auto` reopens a zellij session in tmux whenever tmux is on PATH | `d6_closed_pane_is_reopened_after_the_limit_zellij` |
+| 7 | the daemon registers a project directory that appears while it is busy at its current size and misses the limit already in it | `e3_daemon_reads_a_project_directory_created_while_it_was_busy` |
+| 8 | a hanging `notify-send` uses up the 5 s hook timeout before the resumer is spawned | `h3_hook_cancelled_over_a_hanging_notify_send_still_leaves_a_resumer_tmux` |
+| 9 | the hook looks for the `/rate-limit-options` menu before Claude Code draws it | `d2_weekly_limit_menu_is_answered_as_soon_as_it_opens_tmux` |
+| 10 | right after answering the menu the resumer takes the menu options for typed text and backs off (−60 s and an attempt) | `d2_five_hour_limit_menu_is_answered_before_the_resume_tmux` |
+| 11 | a limit hit by the resume itself is lost: folded into the old episode, and verify compares whole seconds | `d3_slow_limit_hit_again_after_the_resume_is_recorded_anew_tmux` |
+| 12 | a started queued prompt is verified by one screen capture a second after sending; a limit banner drawn later leaves it delivered and never retried (flaky) | `f3_slow_prompt_that_hits_a_limit_at_start_is_retried_tmux`, `f3_slow_prompt_that_hits_a_limit_at_start_is_retried_zellij` |
 
 ## Writing a scenario
 

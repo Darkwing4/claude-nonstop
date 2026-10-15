@@ -183,8 +183,7 @@ fn prompt_that_hits_a_limit_at_start_is_retried(multiplexer: Multiplexer) {
 
     let id = queue_prompt(&scenario, &["--now", PROMPT]);
 
-    let failed_attempt =
-        scenario.wait_for_log(&format!("prompt {id} attempt 1 failed"), STARTUP + TURN);
+    let failed_attempt = wait_for_first_failed_attempt(&scenario, &id);
     let retry = wait_for_status(&scenario, &id, "pending", TURN);
     assert!(
         failed_attempt.ends_with("hit a usage limit right after starting; retry in 60s"),
@@ -231,6 +230,33 @@ fn queue_prompt(scenario: &Scenario, args: &[&str]) -> String {
         .next()
         .expect("prompt add prints the prompt id")
         .to_owned()
+}
+
+fn wait_for_first_failed_attempt(scenario: &Scenario, id: &str) -> String {
+    let failed = format!("prompt {id} attempt 1 failed");
+
+    scenario.wait_for(
+        &format!("claude-nonstop log line with {failed:?}"),
+        STARTUP + TURN,
+        |scenario| {
+            let prompt = find_prompt(scenario, id);
+            assert!(
+                prompt.as_ref().is_none_or(|prompt| prompt["status"] != "delivered"),
+                "KNOWN BUG 12: the resumer checks a started prompt with one screen capture a second after \
+                 sending it; when Claude Code has not drawn the limit banner yet, the prompt is marked \
+                 delivered and never retried while the hook records the limit of its session \
+                 (prompt: {prompt:?}, log:\n{})",
+                scenario.sandbox.nonstop_log()
+            );
+
+            scenario
+                .sandbox
+                .nonstop_log()
+                .lines()
+                .find(|line| line.contains(&failed))
+                .map(str::to_owned)
+        },
+    )
 }
 
 fn find_prompt(scenario: &Scenario, id: &str) -> Option<Value> {

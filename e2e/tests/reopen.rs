@@ -84,7 +84,7 @@ fn closed_pane_is_reopened_after_the_limit(builder: ScenarioBuilder) {
     assert_eq!(
         record["pane"]["mux"],
         pane.multiplexer.name(),
-        "PRODUCT BUG (found by e2e): general.multiplexer=auto reopens a session closed in {} in tmux \
+        "KNOWN BUG 6: general.multiplexer=auto reopens a session closed in {} in tmux \
          whenever tmux is on PATH, a detached session the user never looks at: {reopened}",
         pane.multiplexer.name()
     );

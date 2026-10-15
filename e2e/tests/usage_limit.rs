@@ -48,7 +48,7 @@ fn d1_five_hour_limit_resumes_once_after_reset_tmux() {
             limit["reset_at"].as_u64()
         ),
         (Some("five_hour"), Some("absolute"), Some(reset_at)),
-        "PRODUCT BUG (found by e2e): the StopFailure hook reads the reset time only from the transcript, \
+        "KNOWN BUG 4: the StopFailure hook reads the reset time only from the transcript, \
          which Claude Code has not flushed yet when the hook runs, so {banner:?} is recorded without its reset time"
     );
 
@@ -137,7 +137,7 @@ fn d2_weekly_limit_menu_is_answered_as_soon_as_it_opens_tmux() {
     let answers = menu_answers(&scenario);
     assert!(
         answers.iter().any(|answer| answer.contains(" hook[")),
-        "PRODUCT BUG (found by e2e): the StopFailure hook looks for the rate limit menu before Claude Code draws it, \
+        "KNOWN BUG 9: the StopFailure hook looks for the rate limit menu before Claude Code draws it, \
          so the menu stays open until the reset; answers so far: {answers:?}, screen:\n{}",
         scenario.screen().tail(8)
     );
@@ -170,7 +170,7 @@ fn d2_five_hour_limit_menu_is_answered_before_the_resume_tmux() {
     );
     assert!(
         verdict.contains("resume 1/5 written to"),
-        "PRODUCT BUG (found by e2e): right after pressing Enter in the rate limit menu the resumer reads the input line \
+        "KNOWN BUG 10: right after pressing Enter in the rate limit menu the resumer reads the input line \
          while the menu is still drawn, takes the menu options for text the user is typing and backs off: {verdict}"
     );
     resumed_once_by_nonstop(&scenario, &limited.session_id);
@@ -237,7 +237,7 @@ fn d3_slow_limit_hit_again_after_the_resume_is_recorded_anew_tmux() {
         .expect("the session stays in the ledger");
     assert_eq!(
         settled["status"], "stopped",
-        "PRODUCT BUG (found by e2e): a limit hit again by the resume is lost: the hook reads the old banner from the \
+        "KNOWN BUG 11: a limit hit again by the resume is lost: the hook reads the old banner from the \
          not yet flushed transcript and folds the new limit into the open episode, the resumer compares whole seconds \
          and misses a banner from the same second as the resume, so the session is marked resumed while it is limited \
          ({verdict}; ledger record: {settled})"

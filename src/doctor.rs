@@ -10,7 +10,7 @@ use crate::config;
 use crate::error::Result;
 use crate::install_hook;
 use crate::paths::Paths;
-use crate::platform::process::{CommandOutcome, run_with_timeout};
+use crate::platform::process::run_checked;
 
 pub const TESTED_CLAUDE_VERSION: (u32, u32, u32) = (2, 1, 287);
 const MIN_TMUX: (u32, u32) = (3, 0);
@@ -379,12 +379,7 @@ fn version_of(program: &str, args: &[&str]) -> Option<(u32, u32)> {
 }
 
 fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
-    let mut command = Command::new(program);
-    command.args(args);
-    match run_with_timeout(&mut command, None, PROBE_TIMEOUT) {
-        Ok(CommandOutcome::Finished { status, stdout, .. }) if status.success() => Some(stdout),
-        Ok(_) | Err(_) => None,
-    }
+    run_checked(Command::new(program).args(args), PROBE_TIMEOUT).ok()
 }
 
 fn parse_three(text: &str) -> Option<(u32, u32, u32)> {

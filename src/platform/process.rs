@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 use rustix::process::Pid;
 
 use super::{Reactor, Wake};
+use crate::error::{Error, Result};
 
 pub fn alive(pid: u32) -> bool {
     let Some(pid) = Pid::from_raw(pid as i32) else {
@@ -111,6 +112,36 @@ pub fn run_with_timeout(
     Ok(outcome)
 }
 
+pub fn run_checked(command: &mut Command, timeout: Duration) -> Result<String> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let outcome = run_with_timeout(command, None, timeout)
+        .map_err(|source| Error::command(&program, source.to_string()))?;
+
+    match outcome {
+        CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),
+        CommandOutcome::Finished {
+            status,
+            stdout,
+            stderr,
+        } => {
+            let output = format!("{} {}", stdout.trim(), stderr.trim());
+            Err(Error::command(
+                program,
+                format!("{args} exited with {status}: {}", output.trim()),
+            ))
+        }
+        CommandOutcome::TimedOut => Err(Error::command(
+            program,
+            format!("{args} timed out after {}s", timeout.as_secs()),
+        )),
+    }
+}
+
 #[derive(Debug)]
 pub enum CommandOutcome {
     Finished {
@@ -190,6 +221,27 @@ mod tests {
             .unwrap(),
             CommandOutcome::TimedOut
         ));
+    }
+
+    #[test]
+    fn run_checked_returns_stdout_or_reports_the_command_and_its_output() {
+        let stdout = run_checked(
+            Command::new("sh").args(["-c", "echo ok"]),
+            Duration::from_secs(5),
+        );
+        assert_eq!(stdout.unwrap(), "ok\n");
+        let error = run_checked(
+            Command::new("sh").args(["-c", "echo inactive; echo gone >&2; exit 3"]),
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "sh: -c echo inactive; echo gone >&2; exit 3 exited with exit status: 3: inactive gone"
+        );
+        let error =
+            run_checked(Command::new("sleep").arg("5"), Duration::from_millis(50)).unwrap_err();
+        assert_eq!(error.to_string(), "sleep: 5 timed out after 0s");
     }
 
     #[test]

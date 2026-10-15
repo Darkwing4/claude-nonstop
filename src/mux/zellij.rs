@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::{Key, Multiplexer, PaneAddress};
 use crate::error::{Error, Result};
-use crate::platform::process::{CommandOutcome, run_with_timeout};
+use crate::platform::process::{CommandOutcome, run_checked, run_with_timeout};
 
 const ACTION_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -41,27 +41,7 @@ impl Zellij {
                 command.env_remove(name);
             }
         }
-        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
-            .map_err(|source| Error::command("zellij", source.to_string()))?;
-        match outcome {
-            CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),
-            CommandOutcome::Finished { status, stderr, .. } => Err(Error::command(
-                "zellij",
-                format!(
-                    "action {} exited with {status}: {}",
-                    args.join(" "),
-                    stderr.trim()
-                ),
-            )),
-            CommandOutcome::TimedOut => Err(Error::command(
-                "zellij",
-                format!(
-                    "action {} timed out after {}s",
-                    args.join(" "),
-                    ACTION_TIMEOUT.as_secs()
-                ),
-            )),
-        }
+        run_checked(&mut command, ACTION_TIMEOUT)
     }
 
     fn parts(pane: &PaneAddress) -> Result<(&str, String)> {
@@ -133,26 +113,7 @@ impl Zellij {
                     command.env_remove(name);
                 }
             }
-            match run_with_timeout(&mut command, None, ACTION_TIMEOUT)
-                .map_err(|source| Error::command("zellij", source.to_string()))?
-            {
-                CommandOutcome::Finished { status, stderr, .. } if !status.success() => {
-                    return Err(Error::command(
-                        "zellij",
-                        format!(
-                            "attach -b -c {session} exited with {status}: {}",
-                            stderr.trim()
-                        ),
-                    ));
-                }
-                CommandOutcome::TimedOut => {
-                    return Err(Error::command(
-                        "zellij",
-                        format!("attach -b -c {session} timed out"),
-                    ));
-                }
-                CommandOutcome::Finished { .. } => {}
-            }
+            run_checked(&mut command, ACTION_TIMEOUT)?;
         }
         let mut command = Command::new("zellij");
         command
@@ -170,18 +131,7 @@ impl Zellij {
                 command.env_remove(name);
             }
         }
-        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
-            .map_err(|source| Error::command("zellij", source.to_string()))?;
-        let stdout = match outcome {
-            CommandOutcome::Finished { status, stdout, .. } if status.success() => stdout,
-            CommandOutcome::Finished { status, stderr, .. } => {
-                return Err(Error::command(
-                    "zellij",
-                    format!("run exited with {status}: {}", stderr.trim()),
-                ));
-            }
-            CommandOutcome::TimedOut => return Err(Error::command("zellij", "run timed out")),
-        };
+        let stdout = run_checked(&mut command, ACTION_TIMEOUT)?;
         let pane_id = stdout
             .trim()
             .strip_prefix("terminal_")

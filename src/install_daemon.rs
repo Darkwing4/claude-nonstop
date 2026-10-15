@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::atomic_file;
 use crate::error::{Error, Result};
 use crate::paths::Paths;
-use crate::platform::process::{CommandOutcome, run_with_timeout};
+use crate::platform::process::run_checked;
 
 const UNIT_NAME: &str = "claude-nonstop.service";
 const LAUNCHD_LABEL: &str = "io.github.claude-nonstop";
@@ -132,30 +132,7 @@ pub fn is_active() -> Option<bool> {
 }
 
 fn control(program: &str, args: &[&str]) -> Result<String> {
-    let mut command = Command::new(program);
-    command.args(args);
-    match run_with_timeout(&mut command, None, CONTROL_TIMEOUT)
-        .map_err(|source| Error::command(program, source.to_string()))?
-    {
-        CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),
-        CommandOutcome::Finished {
-            status,
-            stdout,
-            stderr,
-        } => Err(Error::command(
-            program,
-            format!(
-                "{} exited with {status}: {}{}",
-                args.join(" "),
-                stdout.trim(),
-                stderr.trim()
-            ),
-        )),
-        CommandOutcome::TimedOut => Err(Error::command(
-            program,
-            format!("{} timed out", args.join(" ")),
-        )),
-    }
+    run_checked(Command::new(program).args(args), CONTROL_TIMEOUT)
 }
 
 fn xml_escape(text: &str) -> String {

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use super::{Key, Multiplexer, PaneAddress};
 use crate::error::{Error, Result};
-use crate::platform::process::{CommandOutcome, run_with_timeout};
+use crate::platform::process::run_checked;
 
 const ACTION_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -11,25 +11,7 @@ pub struct Tmux;
 
 impl Tmux {
     fn run(args: &[&str]) -> Result<String> {
-        let mut command = Command::new("tmux");
-        command.args(args);
-        let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
-            .map_err(|source| Error::command("tmux", source.to_string()))?;
-        match outcome {
-            CommandOutcome::Finished { status, stdout, .. } if status.success() => Ok(stdout),
-            CommandOutcome::Finished { status, stderr, .. } => Err(Error::command(
-                "tmux",
-                format!("{} exited with {status}: {}", args.join(" "), stderr.trim()),
-            )),
-            CommandOutcome::TimedOut => Err(Error::command(
-                "tmux",
-                format!(
-                    "{} timed out after {}s",
-                    args.join(" "),
-                    ACTION_TIMEOUT.as_secs()
-                ),
-            )),
-        }
+        run_checked(Command::new("tmux").args(args), ACTION_TIMEOUT)
     }
 
     fn id(pane: &PaneAddress) -> Result<&str> {

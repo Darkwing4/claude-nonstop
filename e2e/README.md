@@ -23,7 +23,7 @@ Test names start with the matrix id (`s0_`, `b1_`, `d1_`) and end with the
 multiplexer (`_tmux`, `_zellij`), so both work as filters. A scenario that has
 to sit out a delay claude-nonstop does not let us shorten (the 60 s typing
 backoff, `limit.probe_minutes` of at least a minute, the 120 s limit episode
-window) has `_slow_` right before the multiplexer, `d5_…_slow_tmux`:
+window) has `slow` right after the matrix id, `d5_slow_…`:
 `e2e/run.sh _slow_` runs only those, `--skip _slow_` leaves them out.
 
 ## Failures
@@ -75,6 +75,3 @@ scenario.wait_for_log("resume 1/3 written to", TURN);
   reopened session, a queued prompt) is not logged in. `.login_in_settings()`
   also stores the credentials in the `env` of `settings.json`, the way a real
   login outlives the environment.
-- Scenarios that wait out claude-nonstop's fixed delays (the 60 s retry backoff
-  and longer) have `slow` right after the matrix id, `f3_slow_…`:
-  `e2e/run.sh --skip slow` leaves them out, `e2e/run.sh slow` runs only them.

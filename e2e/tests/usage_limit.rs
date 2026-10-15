@@ -78,7 +78,7 @@ fn d1_five_hour_limit_resumes_once_after_reset_tmux() {
 }
 
 #[test]
-fn d1_five_hour_limit_resumes_once_after_reset_slow_zellij() {
+fn d1_slow_five_hour_limit_resumes_once_after_reset_zellij() {
     let reset_at = whole_minute_after(PROBE * 2);
     let mut scenario = probing_every_minute(Scenario::in_zellij())
         .subscription()
@@ -208,7 +208,7 @@ fn d2_menu_cursor_on_the_second_option_is_moved_to_stop_and_wait_tmux() {
 }
 
 #[test]
-fn d3_limit_hit_again_after_the_resume_is_recorded_anew_slow_tmux() {
+fn d3_slow_limit_hit_again_after_the_resume_is_recorded_anew_tmux() {
     let first_reset = whole_minute_after(EPISODE_WINDOW + PROBE / 2);
     let second_reset = far_reset();
     let mut scenario = probing_every_minute(Scenario::in_tmux())
@@ -299,7 +299,7 @@ fn d4_limit_without_reset_time_waits_for_resume_now_tmux() {
 }
 
 #[test]
-fn d4_limit_without_reset_time_is_probed_without_typing_slow_tmux() {
+fn d4_slow_limit_without_reset_time_is_probed_without_typing_tmux() {
     let mut scenario = limit_without_reset_time(probing_every_minute(Scenario::in_tmux())).start();
     scenario.launch_claude();
 
@@ -324,7 +324,7 @@ fn d4_limit_without_reset_time_is_probed_without_typing_slow_tmux() {
 }
 
 #[test]
-fn d5_without_auto_resume_the_reset_is_left_to_the_user_slow_tmux() {
+fn d5_slow_without_auto_resume_the_reset_is_left_to_the_user_tmux() {
     let reset_at = whole_minute_after(PROBE);
     let mut scenario = probing_every_minute(Scenario::in_tmux())
         .subscription()
@@ -419,7 +419,7 @@ fn d9_restarted_resumer_checks_the_resume_right_away_tmux() {
 }
 
 #[test]
-fn d10_weekly_limit_is_recorded_with_its_reset_date_slow_tmux() {
+fn d10_slow_weekly_limit_is_recorded_with_its_reset_date_tmux() {
     let reset_at = weekly_reset();
     let mut scenario = probing_every_minute(Scenario::in_tmux())
         .subscription()

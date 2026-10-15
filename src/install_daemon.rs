@@ -12,11 +12,9 @@ const LAUNCHD_LABEL: &str = "io.github.claude-nonstop";
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn unit_path(paths: &Paths) -> PathBuf {
-    let config_home = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| paths.home.join(".config"));
-    config_home.join("systemd/user").join(UNIT_NAME)
+    crate::paths::xdg("XDG_CONFIG_HOME", &paths.home, ".config")
+        .join("systemd/user")
+        .join(UNIT_NAME)
 }
 
 pub fn plist_path(paths: &Paths) -> PathBuf {

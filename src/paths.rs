@@ -87,6 +87,6 @@ fn env_path(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn xdg(name: &str, home: &Path, fallback: &str) -> PathBuf {
+pub fn xdg(name: &str, home: &Path, fallback: &str) -> PathBuf {
     env_path(name).unwrap_or_else(|| home.join(fallback))
 }

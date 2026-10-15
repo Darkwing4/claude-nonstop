@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 const MODEL_FALLBACK: &str = "claude-mock";
+const TOOL_USE_ID: &str = "toolu_mock";
 const USAGE_LIMIT_MESSAGE: &str =
     "This request would exceed your account's rate limit. Please try again later.";
 
@@ -42,6 +43,10 @@ pub enum Reply {
     SseError {
         error_type: String,
     },
+    ToolUse {
+        name: String,
+        input: Value,
+    },
 }
 
 impl Reply {
@@ -70,6 +75,13 @@ impl Reply {
 
     pub fn usage_limit(claim: LimitClaim, reset_at: u64) -> Reply {
         Reply::UsageLimit { claim, reset_at }
+    }
+
+    pub fn tool_use(name: &str, input: Value) -> Reply {
+        Reply::ToolUse {
+            name: name.to_owned(),
+            input,
+        }
     }
 
     fn label(&self) -> String {
@@ -400,6 +412,22 @@ fn respond(
 
             Ok(Connection::KeepAlive)
         }
+        Reply::ToolUse { name, input } if stream => {
+            start_sse(writer)?;
+            writer.write_all(&message_start(model))?;
+            writer.write_all(&tool_use_block(name, input))?;
+            writer.write_all(&message_end_with("tool_use"))?;
+
+            Ok(Connection::Close)
+        }
+        Reply::ToolUse { name, input } => {
+            let content =
+                json!([{"type": "tool_use", "id": TOOL_USE_ID, "name": name, "input": input}]);
+            let message = message_json_with(model, content, "tool_use");
+            write_json(writer, 200, &message, &[])?;
+
+            Ok(Connection::KeepAlive)
+        }
         Reply::Status {
             code,
             error_type,
@@ -608,14 +636,31 @@ fn text_block(text: &str) -> Vec<u8> {
     bytes
 }
 
+fn tool_use_block(name: &str, input: &Value) -> Vec<u8> {
+    let mut bytes = sse(
+        "content_block_start",
+        &json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": TOOL_USE_ID, "name": name, "input": {}}}),
+    );
+    bytes.extend(sse(
+        "content_block_delta",
+        &json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": input.to_string()}}),
+    ));
+
+    bytes
+}
+
 fn message_end() -> Vec<u8> {
+    message_end_with("end_turn")
+}
+
+fn message_end_with(stop_reason: &str) -> Vec<u8> {
     let mut bytes = sse(
         "content_block_stop",
         &json!({"type": "content_block_stop", "index": 0}),
     );
     bytes.extend(sse(
         "message_delta",
-        &json!({"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": null}, "usage": {"output_tokens": 1}}),
+        &json!({"type": "message_delta", "delta": {"stop_reason": stop_reason, "stop_sequence": null}, "usage": {"output_tokens": 1}}),
     ));
     bytes.extend(sse("message_stop", &json!({"type": "message_stop"})));
 
@@ -623,13 +668,17 @@ fn message_end() -> Vec<u8> {
 }
 
 fn message_json(model: &str, text: &str) -> Value {
+    message_json_with(model, json!([{"type": "text", "text": text}]), "end_turn")
+}
+
+fn message_json_with(model: &str, content: Value, stop_reason: &str) -> Value {
     json!({
         "id": "msg_mock",
         "type": "message",
         "role": "assistant",
         "model": model,
-        "content": [{"type": "text", "text": text}],
-        "stop_reason": "end_turn",
+        "content": content,
+        "stop_reason": stop_reason,
         "stop_sequence": null,
         "usage": {"input_tokens": 10, "output_tokens": 1},
     })

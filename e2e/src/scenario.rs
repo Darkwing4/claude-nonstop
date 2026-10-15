@@ -123,8 +123,13 @@ impl Scenario {
     }
 
     pub fn launch_claude_with(&mut self, extra_args: &[&str]) -> Pane {
+        self.launch_claude_under(&[], extra_args)
+    }
+
+    pub fn launch_claude_under(&mut self, wrapper: &[&str], extra_args: &[&str]) -> Pane {
         let starts_before = self.sandbox.hooks_of("SessionStart").len();
-        let argv = self.sandbox.claude_argv(extra_args);
+        let mut argv: Vec<String> = wrapper.iter().map(|arg| (*arg).to_owned()).collect();
+        argv.extend(self.sandbox.claude_argv(extra_args));
         let pane = self.terminal.launch(&self.sandbox.workdir, &argv);
         self.claude = Some(pane.clone());
 

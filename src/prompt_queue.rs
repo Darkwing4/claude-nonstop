@@ -91,10 +91,6 @@ pub fn add(
     Ok(stored)
 }
 
-pub fn list(paths: &Paths) -> Result<Vec<QueuedPrompt>> {
-    Ok(ledger::read(paths)?.prompts)
-}
-
 pub fn remove(paths: &Paths, id: &str) -> Result<bool> {
     ledger::update(paths, |book| {
         let mut found = false;

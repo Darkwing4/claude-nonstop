@@ -119,7 +119,7 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
                 item.id,
                 item.agent.name(),
                 prompt_queue::describe_when(item),
-                prompt_label(item.status),
+                format!("{:?}", item.status).to_lowercase(),
                 item.cwd.display()
             ));
         }
@@ -206,16 +206,6 @@ fn status_label(status: Status) -> &'static str {
         Status::Resumed => "RESUMED",
         Status::Failed => "FAILED",
         Status::Cancelled => "CANCELLED",
-    }
-}
-
-fn prompt_label(status: PromptStatus) -> &'static str {
-    match status {
-        PromptStatus::Pending => "pending",
-        PromptStatus::Launching => "launching",
-        PromptStatus::Delivered => "delivered",
-        PromptStatus::Failed => "failed",
-        PromptStatus::Cancelled => "cancelled",
     }
 }
 

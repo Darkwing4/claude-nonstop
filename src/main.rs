@@ -151,13 +151,7 @@ fn run(cli: Cli) -> Result<i32> {
             let findings = doctor::run(&paths, args.fix)?;
             if args.json {
                 let report = serde_json::json!({ "version": 1, "findings": findings });
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report).map_err(|source| Error::Json {
-                        path: "doctor".into(),
-                        source
-                    })?
-                );
+                print_json("doctor", &report)?;
             } else {
                 for finding in &findings {
                     let mark = if finding.fixed {
@@ -231,16 +225,10 @@ fn prompt_command(paths: &Paths, action: PromptAction) -> Result<i32> {
             Ok(0)
         }
         PromptAction::List { json } => {
-            let items = prompt_queue::list(paths)?;
+            let items = ledger::read(paths)?.prompts;
             if json {
                 let report = serde_json::json!({ "version": 1, "prompts": items });
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report).map_err(|source| Error::Json {
-                        path: "prompts".into(),
-                        source
-                    })?
-                );
+                print_json("prompts", &report)?;
             } else {
                 for item in &items {
                     let preview: String = item.prompt.chars().take(60).collect();
@@ -302,13 +290,7 @@ fn config_command(paths: &Paths, action: ConfigAction) -> Result<i32> {
                     .map(|(key, value, source)| serde_json::json!({ "key": key, "value": value, "source": source_label(*source) }))
                     .collect();
                 let report = serde_json::json!({ "version": 1, "path": paths.config_file, "entries": entries });
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report).map_err(|source| Error::Json {
-                        path: "config".into(),
-                        source
-                    })?
-                );
+                print_json("config", &report)?;
             } else {
                 let width = rows.iter().map(|(key, _, _)| key.len()).max().unwrap_or(0);
                 for (key, value, source) in &rows {
@@ -318,6 +300,15 @@ fn config_command(paths: &Paths, action: ConfigAction) -> Result<i32> {
             Ok(0)
         }
     }
+}
+
+fn print_json(label: &str, report: &serde_json::Value) -> Result<()> {
+    let text = serde_json::to_string_pretty(report).map_err(|source| Error::Json {
+        path: label.into(),
+        source,
+    })?;
+    println!("{text}");
+    Ok(())
 }
 
 fn severity_label(severity: doctor::Severity) -> &'static str {

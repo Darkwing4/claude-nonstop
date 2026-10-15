@@ -32,12 +32,14 @@ pub fn parse_at(text: &str, now: Timestamp, tz: &TimeZone) -> Result<u64> {
         return future_only(seconds, now);
     }
     if let Some(captures) = CLOCK_24.captures(trimmed) {
-        let clock = clock_from_parts(&captures[1], Some(&captures[2]), None);
+        let clock = clock_from_parts(&captures[1], Some(&captures[2]), None)
+            .ok_or_else(|| Error::Invalid(format!("{trimmed:?} is not a valid clock time")))?;
         return next_clock(clock, trimmed, now, tz);
     }
     if let Some(captures) = CLOCK_12.captures(trimmed) {
         let minute = captures.get(2).map(|m| m.as_str());
-        let clock = clock_from_parts(&captures[1], minute, Some(&captures[3]));
+        let clock = clock_from_parts(&captures[1], minute, Some(&captures[3]))
+            .ok_or_else(|| Error::Invalid(format!("{trimmed:?} is not a valid clock time")))?;
         return next_clock(clock, trimmed, now, tz);
     }
     if let Ok(timestamp) = trimmed.parse::<Timestamp>() {
@@ -59,13 +61,7 @@ fn is_epoch(text: &str) -> bool {
     matches!(text.len(), 10 | 13) && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn next_clock(clock: Option<Clock>, text: &str, now: Timestamp, tz: &TimeZone) -> Result<u64> {
-    let Some(clock) = clock else {
-        return Err(Error::Invalid(format!(
-            "{text:?} is not a valid clock time"
-        )));
-    };
-
+fn next_clock(clock: Clock, text: &str, now: Timestamp, tz: &TimeZone) -> Result<u64> {
     let today = now.to_zoned(tz.clone()).date();
     let tomorrow = today
         .tomorrow()

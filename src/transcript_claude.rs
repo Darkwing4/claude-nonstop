@@ -92,7 +92,7 @@ fn kinds_after(
     drop_partial_first: bool,
     prompts: &[&str],
 ) -> io::Result<Vec<Option<UserRecord>>> {
-    let data = read_lines_from(path, start, drop_partial_first)?;
+    let data = read_from_line_boundary(path, start, drop_partial_first)?;
     let mut kinds = Vec::new();
     for raw in data.split(|byte| *byte == b'\n') {
         if raw.iter().all(u8::is_ascii_whitespace) {
@@ -106,7 +106,11 @@ fn kinds_after(
     Ok(kinds)
 }
 
-fn read_lines_from(path: &Path, start: u64, drop_partial_first: bool) -> io::Result<Vec<u8>> {
+fn read_from_line_boundary(
+    path: &Path,
+    start: u64,
+    drop_partial_first: bool,
+) -> io::Result<Vec<u8>> {
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(start))?;
     let mut data = Vec::new();
@@ -135,7 +139,7 @@ pub fn latest_limit_record(
     overload: &crate::config::Overload,
 ) -> io::Result<Option<LimitRecord>> {
     let start = std::fs::metadata(path)?.len().saturating_sub(SCAN_BYTES);
-    let data = read_lines_from(path, start, start > 0)?;
+    let data = read_from_line_boundary(path, start, start > 0)?;
     let latest = data
         .split(|byte| *byte == b'\n')
         .rev()
@@ -202,7 +206,7 @@ pub fn limit_kind(text: &str) -> crate::ledger::LimitType {
 
 pub fn progressed_after(path: &Path, since: u64) -> io::Result<bool> {
     let start = std::fs::metadata(path)?.len().saturating_sub(SCAN_BYTES);
-    let data = read_lines_from(path, start, start > 0)?;
+    let data = read_from_line_boundary(path, start, start > 0)?;
     for raw in data.split(|byte| *byte == b'\n').rev() {
         let Ok(record) = serde_json::from_slice::<Value>(raw) else {
             continue;

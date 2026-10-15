@@ -99,7 +99,7 @@ pub fn launch_argv(
     argv
 }
 
-pub fn open_in(target: Where, cwd: &std::path::Path, argv: &[OsString]) -> Result<PaneAddress> {
+fn open_in(target: Where, cwd: &Path, argv: &[OsString]) -> Result<PaneAddress> {
     match target {
         Where::Tmux => mux::tmux::Tmux::open_window(RESUME_SESSION, cwd, argv),
         Where::Zellij => mux::zellij::Zellij::open_window(RESUME_SESSION, cwd, argv),
@@ -112,7 +112,7 @@ pub fn open_in(target: Where, cwd: &std::path::Path, argv: &[OsString]) -> Resul
 pub fn spawn_detached_headless(
     paths: &Paths,
     name: &str,
-    cwd: &std::path::Path,
+    cwd: &Path,
     argv: Vec<OsString>,
 ) -> Result<PaneAddress> {
     let log_path = paths.headless_dir().join(format!("{name}.log"));
@@ -152,11 +152,7 @@ pub fn spawn_detached_headless(
     Ok(PaneAddress::Headless { pid: child.id() })
 }
 
-pub fn wait_for_prompt(
-    driver: &dyn mux::Multiplexer,
-    pane: &PaneAddress,
-    glyph: char,
-) -> Result<()> {
+fn wait_for_prompt(driver: &dyn mux::Multiplexer, pane: &PaneAddress, glyph: char) -> Result<()> {
     let started = std::time::Instant::now();
     loop {
         let visible = driver.capture(pane, false)?;

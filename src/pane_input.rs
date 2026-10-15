@@ -46,9 +46,11 @@ impl<'a> Typing<'a> {
     pub fn ensure_idle_prompt(&self) -> Result<()> {
         let visible = self.mux.capture(self.pane, false)?;
         let text = screen::strip_ansi(visible.as_bytes());
+
         if screen::is_busy(&text) {
             return Err(Error::Invalid(format!("{} is busy with a turn", self.pane)));
         }
+
         match screen::input_line(&text, self.agent.prompt_glyph()) {
             Some(line) if !line.is_empty() => Err(Error::Invalid(format!(
                 "{} has text in its input line ({} chars), the user may be typing",
@@ -68,6 +70,7 @@ impl<'a> Typing<'a> {
         self.ensure_alive()?;
         self.ensure_foreground()?;
         self.ensure_idle_prompt()?;
+
         self.mux.send_text(self.pane, text)?;
         std::thread::sleep(SUBMIT_GAP);
         self.mux.send_key(self.pane, Key::Enter)

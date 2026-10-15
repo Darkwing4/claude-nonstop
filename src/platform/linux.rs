@@ -34,6 +34,7 @@ impl Reactor {
             TimerfdClockId::Realtime,
             TimerfdFlags::NONBLOCK | TimerfdFlags::CLOEXEC,
         )?;
+
         Ok(Reactor {
             inotify,
             timer,
@@ -48,6 +49,7 @@ impl Reactor {
             | WatchFlags::MODIFY
             | WatchFlags::DELETE_SELF;
         let wd = inotify::add_watch(&self.inotify, path, flags)?;
+
         Ok(self.register(Source::Dir { wd }))
     }
 
@@ -55,6 +57,7 @@ impl Reactor {
         let pid = Pid::from_raw(pid as i32)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "pid is zero"))?;
         let fd = pidfd_open(pid, PidfdFlags::empty())?;
+
         Ok(self.register(Source::Process { fd }))
     }
 
@@ -72,6 +75,7 @@ impl Reactor {
                 tv_nsec: 0,
             },
         };
+
         let spec = Itimerspec {
             it_interval: Timespec {
                 tv_sec: 0,
@@ -84,6 +88,7 @@ impl Reactor {
             TimerfdTimerFlags::ABSTIME | TimerfdTimerFlags::CANCEL_ON_SET,
             &spec,
         )?;
+
         Ok(())
     }
 
@@ -99,6 +104,7 @@ impl Reactor {
                 fds.push(PollFd::new(fd, PollFlags::IN));
             }
         }
+
         loop {
             match poll(&mut fds, None) {
                 Ok(_) => break,
@@ -106,21 +112,26 @@ impl Reactor {
                 Err(error) => return Err(error.into()),
             }
         }
+
         let ready: Vec<PollFlags> = fds.iter().map(PollFd::revents).collect();
         drop(fds);
+
         let mut wakes = Vec::new();
         if ready[0].intersects(PollFlags::IN) {
             self.drain_inotify(&mut wakes)?;
         }
+
         if ready[1].intersects(PollFlags::IN) {
             self.drain_timer(&mut wakes)?;
         }
+
         for (index, id) in ids.iter().enumerate() {
             if ready[index + 2].intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR) {
                 self.sources.remove(id);
                 wakes.push(Wake::ProcessExited(*id));
             }
         }
+
         Ok(wakes)
     }
 
@@ -128,6 +139,7 @@ impl Reactor {
         let id = SourceId(self.next_id);
         self.next_id += 1;
         self.sources.insert(id, source);
+
         id
     }
 
@@ -151,9 +163,11 @@ impl Reactor {
                     Err(error) => return Err(error.into()),
                 }
             }
+
             if events.is_empty() {
                 return Ok(());
             }
+
             for (wd, flags, name) in events {
                 self.translate(wd, flags, name, wakes);
             }
@@ -171,13 +185,16 @@ impl Reactor {
             Source::Dir { wd: watched } if *watched == wd => Some(*id),
             _ => None,
         });
+
         let Some(id) = found else {
             return;
         };
+
         if flags.intersects(ReadFlags::DELETE_SELF | ReadFlags::MOVE_SELF | ReadFlags::IGNORED) {
             self.sources.remove(&id);
             return;
         }
+
         if let Some(name) = name {
             wakes.push(Wake::DirEntry(id, name));
         }
@@ -191,6 +208,7 @@ impl Reactor {
             Err(rustix::io::Errno::WOULDBLOCK) => {}
             Err(error) => return Err(error.into()),
         }
+
         Ok(())
     }
 }

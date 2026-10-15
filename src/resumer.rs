@@ -32,6 +32,7 @@ pub fn spawn_if_needed(paths: &Paths) -> Result<()> {
     };
 
     drop(lock);
+
     let exe =
         std::env::current_exe().map_err(|source| Error::io("claude-nonstop", "resolve", source))?;
     let stderr_path = paths.log_dir().join("resumer-stderr.log");
@@ -42,15 +43,18 @@ pub fn spawn_if_needed(paths: &Paths) -> Result<()> {
         .map_err(|source| Error::io(&stderr_path, "open", source))?;
     let mut command = Command::new(exe);
     command.arg("resumer").stdout(Stdio::null()).stderr(stderr);
+
     spawn_detached(&mut command)
         .map_err(|source| Error::io("claude-nonstop resumer", "spawn", source))?;
     log::line("", "resumer spawned");
+
     Ok(())
 }
 
 fn try_lock(paths: &Paths) -> Result<Option<File>> {
     let lock_path = paths.resumer_lock();
     let lock = ledger::open_lock(&lock_path)?;
+
     match flock(&lock, FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => Ok(Some(lock)),
         Err(rustix::io::Errno::WOULDBLOCK) => Ok(None),
@@ -65,11 +69,13 @@ pub fn run(paths: &Paths, config: &Config, persistent: bool) -> Result<i32> {
     };
 
     ledger::update(paths, |book| book.resumer_pid = Some(std::process::id()))?;
+
     let mut reactor = Reactor::new().map_err(|source| Error::io("reactor", "create", source))?;
     reactor
         .watch_dir(&paths.state)
         .map_err(|source| Error::io(&paths.state, "watch", source))?;
     let mut verify_at: BTreeMap<String, u64> = BTreeMap::new();
+
     let mut transcripts = if persistent {
         Some(TranscriptWatch::start(
             &mut reactor,
@@ -79,6 +85,7 @@ pub fn run(paths: &Paths, config: &Config, persistent: bool) -> Result<i32> {
     } else {
         None
     };
+
     log::line(
         "",
         format!(
@@ -86,6 +93,7 @@ pub fn run(paths: &Paths, config: &Config, persistent: bool) -> Result<i32> {
             if persistent { " (persistent)" } else { "" }
         ),
     );
+
     loop {
         let next = pass(paths, config, &mut verify_at)?;
         match next {
@@ -98,9 +106,11 @@ pub fn run(paths: &Paths, config: &Config, persistent: bool) -> Result<i32> {
             None => {
                 ledger::update(paths, |book| book.resumer_pid = None)?;
                 log::line("", "nothing left to wait for, resumer exiting");
+
                 return Ok(0);
             }
         }
+
         let wakes = reactor
             .wait()
             .map_err(|source| Error::io("reactor", "wait", source))?;
@@ -135,12 +145,14 @@ fn pass(
             Status::Resuming => *verify_at.entry(record.key.clone()).or_insert(now),
             _ => continue,
         };
+
         if due <= now {
             let handled = match record.status {
                 Status::Stopped => dispatch(paths, config, record, verify_at),
                 Status::Resuming => verify(paths, config, record, verify_at),
                 _ => Ok(()),
             };
+
             if let Err(error) = handled {
                 postpone(paths, record, &error, verify_at)?;
             }
@@ -155,12 +167,14 @@ fn pass(
             Status::Resuming => verify_at.get(&record.key).copied().unwrap_or(now),
             _ => continue,
         };
+
         if due > now {
             next = Some(next.map_or(due, |current| current.min(due)));
         } else if record.status == Status::Stopped {
             next = Some(now + 1);
         }
     }
+
     if after.prompts.iter().any(|item| {
         matches!(
             item.status,
@@ -170,6 +184,7 @@ fn pass(
     {
         next = Some(now + 60);
     }
+
     Ok(next)
 }
 
@@ -186,6 +201,7 @@ fn dispatch(
     let key = record.key.clone();
     let session = record.session_id.clone().unwrap_or_default();
     let transcript = claude_sessions::transcript_path(paths, &session);
+
     if let Some(path) = &transcript {
         if transcript_claude::progressed_after(path, record.episode_at())
             .map_err(|source| Error::io(path, "read", source))?
@@ -195,12 +211,15 @@ fn dispatch(
             return Ok(());
         }
     }
+
     if probing_allowed(config, record) {
         return probe(paths, config, record, transcript.as_deref());
     }
+
     if !config.general.auto_resume && record.reset_source != ResetSource::Manual {
         return leave_to_user(paths, config, record);
     }
+
     if record.attempts >= config.limit.max_attempts {
         let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
         let outcome = notify::send(
@@ -209,6 +228,7 @@ fn dispatch(
             &format!("{name}: {} attempts, still limited", record.attempts),
             true,
         );
+
         ledger::cas(paths, &key, &[Status::Stopped], |current| {
             current.status = Status::Failed;
             current.last_error = Some(format!("{} attempts without progress", current.attempts));
@@ -217,15 +237,19 @@ fn dispatch(
             &session,
             format!("giving up after {} attempts ({outcome})", record.attempts),
         );
+
         return Ok(());
     }
+
     let Some(pane) = live_pane(record)? else {
         return reopen_session(paths, config, record, verify_at);
     };
+
     let typing = Typing::new(&pane, record.agent);
     if config.general.menu_auto_answer {
         recover::answer_menu(&typing, &session)?;
     }
+
     let message = crate::reopen::prompt_for(config, record);
     let now = now_unix();
     match typing.submit(&message) {
@@ -238,6 +262,7 @@ fn dispatch(
                 current.resume_episode_at = Some(now);
             })?;
             verify_at.insert(key, now + u64::from(config.limit.verify_seconds));
+
             log::line(
                 &session,
                 format!(
@@ -254,6 +279,7 @@ fn dispatch(
                 current.last_error = Some(error.to_string());
                 current.reset_at = retry_at;
             })?;
+
             log::line(
                 &session,
                 format!(
@@ -263,6 +289,7 @@ fn dispatch(
             );
         }
     }
+
     Ok(())
 }
 
@@ -283,6 +310,7 @@ fn postpone(
             current.last_error = Some(error.to_string());
         },
     )?;
+
     if record.status == Status::Resuming {
         verify_at.insert(record.key.clone(), retry_at);
     }
@@ -291,12 +319,14 @@ fn postpone(
         record.session_id.as_deref().unwrap_or(&record.key),
         format!("{error}; next try at {}", stamp(retry_at)),
     );
+
     Ok(())
 }
 
 fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> Result<()> {
     let key = record.key.clone();
     let session = record.session_id.clone().unwrap_or_default();
+
     let last_sent = record.last_attempt_at.unwrap_or(record.detected_at);
     if let Some(path) = claude_sessions::transcript_path(paths, &session) {
         if transcript_claude::progressed_after(&path, last_sent)
@@ -321,6 +351,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
             ),
             true,
         );
+
         ledger::cas(paths, &key, &[Status::Stopped], |current| {
             current.status = Status::Failed;
         })?;
@@ -331,6 +362,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
                 config.overload.max_total_minutes
             ),
         );
+
         return Ok(());
     }
 
@@ -340,6 +372,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
             current.last_error = Some("pane is gone".to_owned());
         })?;
         log::line(&session, "overloaded: the pane is gone, nothing to resume");
+
         return Ok(());
     };
 
@@ -355,6 +388,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
                 current.attempts += 1;
                 current.last_attempt_at = Some(now);
             })?;
+
             let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
@@ -362,6 +396,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
                 &format!("{name}: overloaded, try {}", record.attempts + 1),
                 false,
             );
+
             log::line(
                 &session,
                 format!(
@@ -381,6 +416,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
                 current.reset_at = retry_at;
                 current.last_error = Some(error.to_string());
             })?;
+
             log::line(
                 &session,
                 format!(
@@ -390,6 +426,7 @@ fn dispatch_overload(paths: &Paths, config: &Config, record: &SessionRecord) -> 
             );
         }
     }
+
     Ok(())
 }
 
@@ -401,6 +438,7 @@ fn reopen_session(
 ) -> Result<()> {
     let key = record.key.clone();
     let session = record.session_id.clone().unwrap_or_default();
+
     if let Some(pane) = &record.pane {
         if pane.is_headless() && mux::for_pane(pane).pane_alive(pane)? {
             let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
@@ -410,6 +448,7 @@ fn reopen_session(
                 &format!("{name}: limit reset, but the session runs outside a terminal pane"),
                 true,
             );
+
             ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Failed;
                 current.last_error = Some("running outside a pane, cannot type".to_owned());
@@ -418,9 +457,11 @@ fn reopen_session(
                 &session,
                 format!("limit reset but {pane} is a live agent without a pane ({outcome})"),
             );
+
             return Ok(());
         }
     }
+
     if let Some(entry) = claude_sessions::by_session_id(paths, &session)? {
         if crate::platform::process::alive(entry.pid) {
             let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
@@ -430,6 +471,7 @@ fn reopen_session(
                 &format!("{name}: limit reset, but its pane is unknown to claude-nonstop"),
                 true,
             );
+
             ledger::cas(paths, &key, &[Status::Stopped], |current| {
                 current.status = Status::Failed;
                 current.last_error = Some(format!(
@@ -444,9 +486,11 @@ fn reopen_session(
                     entry.pid
                 ),
             );
+
             return Ok(());
         }
     }
+
     let prompt = crate::reopen::prompt_for(config, record);
     let now = now_unix();
     match crate::reopen::reopen(paths, config, record, &prompt) {
@@ -460,6 +504,7 @@ fn reopen_session(
                 current.resume_episode_at = Some(now);
             })?;
             verify_at.insert(key, now + u64::from(config.limit.verify_seconds));
+
             let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
@@ -467,6 +512,7 @@ fn reopen_session(
                 &format!("{name}: continued in {pane}"),
                 false,
             );
+
             log::line(
                 &session,
                 format!(
@@ -483,12 +529,14 @@ fn reopen_session(
                 current.last_error = Some(error.to_string());
                 current.reset_at = retry_at;
             })?;
+
             log::line(
                 &session,
                 format!("reopen failed: {error}; next try in {}s", retry_at - now),
             );
         }
     }
+
     Ok(())
 }
 
@@ -502,11 +550,13 @@ fn verify(
     let session = record.session_id.clone().unwrap_or_default();
     let episode = record.resume_episode_at.unwrap_or(record.episode_at());
     verify_at.remove(&key);
+
     if let Some(path) = claude_sessions::transcript_path(paths, &session) {
         if transcript_claude::progressed_after(&path, episode)
             .map_err(|source| Error::io(&path, "read", source))?
         {
             finish(paths, &key, ResumedBy::Nonstop)?;
+
             let name = display_name(paths, &session, record.pane.as_ref(), &record.cwd);
             let outcome = notify::send(
                 &config.notify,
@@ -515,8 +565,10 @@ fn verify(
                 false,
             );
             log::line(&session, format!("resumed after the limit ({outcome})"));
+
             return Ok(());
         }
+
         if let Some(latest) = transcript_claude::latest_limit_record(&path, &config.overload)
             .map_err(|source| Error::io(&path, "read", source))?
         {
@@ -530,6 +582,7 @@ fn verify(
                     current.banner_at = Some(latest.at);
                     current.limit = latest.kind;
                 })?;
+
                 log::line(
                     &session,
                     format!(
@@ -537,12 +590,15 @@ fn verify(
                         stamp(retry_at)
                     ),
                 );
+
                 return Ok(());
             }
         }
     }
+
     finish(paths, &key, ResumedBy::Nonstop)?;
     log::line(&session, "resume delivered, no new limit seen");
+
     Ok(())
 }
 
@@ -554,6 +610,7 @@ fn probe(
 ) -> Result<()> {
     let key = record.key.clone();
     let session = record.session_id.clone().unwrap_or_default();
+
     if let Some(path) = transcript {
         if let Some(latest) = transcript_claude::latest_limit_record(path, &config.overload)
             .map_err(|source| Error::io(path, "read", source))?
@@ -570,10 +627,12 @@ fn probe(
                     &session,
                     format!("reset time learned from the transcript: {}", stamp(at)),
                 );
+
                 return Ok(());
             }
         }
     }
+
     let step = config.limit.probe_minutes
         [(record.probe_count as usize).min(config.limit.probe_minutes.len() - 1)];
     let next = now_unix() + u64::from(step) * 60;
@@ -585,6 +644,7 @@ fn probe(
         &session,
         format!("no reset time known, probing again in {step} min"),
     );
+
     Ok(())
 }
 
@@ -602,6 +662,7 @@ fn leave_to_user(paths: &Paths, config: &Config, record: &SessionRecord) -> Resu
         &format!("{name}: limit reset, auto_resume is off, run claude-nonstop resume-now"),
         true,
     );
+
     ledger::cas(paths, &record.key, &[Status::Stopped], |current| {
         current.status = Status::Failed;
         current.last_error = Some("auto_resume is off, waiting for resume-now".to_owned());
@@ -610,6 +671,7 @@ fn leave_to_user(paths: &Paths, config: &Config, record: &SessionRecord) -> Resu
         &session,
         format!("limit reset, auto_resume is off, left to the user ({outcome})"),
     );
+
     Ok(())
 }
 
@@ -707,18 +769,21 @@ mod tests {
                 book.sessions.insert(key.to_owned(), record.clone());
             })
             .unwrap();
+
             dispatch(&paths, &config, &record, &mut verify_at).unwrap();
         }
 
         let book = ledger::read(&paths).unwrap();
         let held = &book.sessions["auto"];
         let gave_up = format!("{} attempts without progress", config.limit.max_attempts);
+
         assert_eq!(held.status, Status::Failed);
         assert_eq!(
             held.last_error.as_deref(),
             Some("auto_resume is off, waiting for resume-now")
         );
         assert_eq!(book.sessions["manual"].last_error, Some(gave_up));
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

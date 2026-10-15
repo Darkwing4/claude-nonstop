@@ -124,6 +124,7 @@ pub fn parse_reset(text: &str) -> Option<ResetSpec> {
 fn parse_relative(pattern: &Regex, text: &str) -> Option<ResetSpec> {
     let captures = pattern.captures(text)?;
     let duration = parse_duration(capture(&captures, 1)?)?;
+
     Some(ResetSpec::Relative(duration))
 }
 
@@ -137,6 +138,7 @@ fn parse_try_again_at_date(text: &str) -> Option<ResetSpec> {
         capture(&captures, 5),
         capture(&captures, 6),
     )?;
+
     Some(ResetSpec::Wall {
         date: WallDate::MonthDay {
             month,
@@ -155,6 +157,7 @@ fn parse_try_again_at_clock(text: &str) -> Option<ResetSpec> {
         capture(&captures, 2),
         capture(&captures, 3),
     )?;
+
     Some(ResetSpec::Wall {
         date: WallDate::Today,
         clock,
@@ -176,6 +179,7 @@ fn parse_resets_month_day(text: &str) -> Option<ResetSpec> {
         capture(&captures, 6),
     )?;
     let tz = zone_from_capture(capture(&captures, 7))?;
+
     Some(ResetSpec::Wall {
         date: WallDate::MonthDay { month, day, year },
         clock,
@@ -187,19 +191,23 @@ fn parse_resets_clock(text: &str) -> Option<ResetSpec> {
     let captures = RESETS_CLOCK.captures(text)?;
     let whole_match = captures.get(0)?;
     let text_after_match = &text[whole_match.end()..];
+
     if DURATION_UNIT_AHEAD.is_match(text_after_match) {
         return None;
     }
+
     let date = match capture(&captures, 1) {
         Some(raw_weekday) => WallDate::Weekday(weekday_from_name(raw_weekday)?),
         None => WallDate::Today,
     };
+
     let clock = clock_from_parts(
         capture(&captures, 2)?,
         capture(&captures, 3),
         capture(&captures, 4),
     )?;
     let tz = zone_from_capture(capture(&captures, 5))?;
+
     Some(ResetSpec::Wall { date, clock, tz })
 }
 
@@ -211,6 +219,7 @@ fn parse_resets_weekday(text: &str) -> Option<ResetSpec> {
         minute: 0,
         ambiguous: false,
     };
+
     Some(ResetSpec::Wall {
         date: WallDate::Weekday(weekday),
         clock: midnight,
@@ -232,27 +241,34 @@ pub fn clock_from_parts(
     meridiem: Option<&str>,
 ) -> Option<Clock> {
     let hour: u8 = raw_hour.parse().ok()?;
+
     let minute: u8 = match raw_minute {
         Some(raw) => raw.parse().ok()?,
         None => 0,
     };
+
     if minute > 59 {
         return None;
     }
+
     let Some(meridiem) = meridiem else {
         if hour > 23 {
             return None;
         }
+
         let ambiguous = (1..=12).contains(&hour);
+
         return Some(Clock {
             hour,
             minute,
             ambiguous,
         });
     };
+
     if !(1..=12).contains(&hour) {
         return None;
     }
+
     let is_pm = meridiem.eq_ignore_ascii_case("pm");
     let hour_24 = match (hour, is_pm) {
         (12, false) => 0,
@@ -260,6 +276,7 @@ pub fn clock_from_parts(
         (_, false) => hour,
         (_, true) => hour + 12,
     };
+
     Some(Clock {
         hour: hour_24,
         minute,
@@ -288,9 +305,11 @@ pub fn parse_duration(text: &str) -> Option<Duration> {
     let mut found_any_part = false;
     loop {
         rest = skip_duration_separators(rest);
+
         if rest.is_empty() {
             break;
         }
+
         let (number, after_number) = take_number(rest)?;
         let (unit, after_unit) = take_unit(after_number.trim_start())?;
         let unit_seconds = unit_seconds(unit)?;
@@ -299,6 +318,7 @@ pub fn parse_duration(text: &str) -> Option<Duration> {
         found_any_part = true;
         rest = after_unit;
     }
+
     if found_any_part { Some(total) } else { None }
 }
 
@@ -313,10 +333,12 @@ fn skip_duration_separators(text: &str) -> &str {
             .get(3..)
             .and_then(|after| after.chars().next())
             .is_none_or(|c| !c.is_alphanumeric());
+
         if starts_with_and && and_is_whole_word {
             rest = &rest[3..];
             continue;
         }
+
         return rest;
     }
 }
@@ -329,7 +351,9 @@ fn take_number(text: &str) -> Option<(f64, &str)> {
     if !raw.chars().any(|c| c.is_ascii_digit()) {
         return None;
     }
+
     let number: f64 = raw.parse().ok()?;
+
     Some((number, &text[end..]))
 }
 
@@ -340,6 +364,7 @@ fn take_unit(text: &str) -> Option<(&str, &str)> {
     if end == 0 {
         return None;
     }
+
     Some((&text[..end], &text[end..]))
 }
 
@@ -353,6 +378,7 @@ fn unit_seconds(unit: &str) -> Option<f64> {
         "w" | "week" | "weeks" => 604_800.0,
         _ => return None,
     };
+
     Some(seconds)
 }
 
@@ -373,15 +399,18 @@ pub fn resolve(
         at: now.checked_add(probe).unwrap_or(now),
         source: ResetSource::Fallback,
     };
+
     let Some(spec) = spec else {
         return fallback;
     };
+
     match spec {
         ResetSpec::Relative(delay) => {
             let anchor = banner_at.unwrap_or(now);
             let after_delay = anchor
                 .checked_add(*delay)
                 .and_then(|t| t.checked_add(margin));
+
             match after_delay {
                 Ok(at) => Resolved {
                     at,
@@ -400,10 +429,13 @@ pub fn resolve(
                     resolve_month_day(tz, clock, *month, *day, *year, anchor, now)
                 }
             };
+
             let Some(wall_at) = wall_at else {
                 return fallback;
             };
+
             let base = if wall_at <= now { now } else { wall_at };
+
             match base.checked_add(margin) {
                 Ok(at) => Resolved {
                     at,
@@ -419,9 +451,11 @@ pub fn stale_five_hour_clamp(at: Timestamp, detected_at: Timestamp, margin: Dura
     let Ok(at_without_margin) = at.checked_sub(margin) else {
         return at;
     };
+
     let Ok(stale_boundary) = detected_at.checked_add(STALE_FIVE_HOUR_WINDOW) else {
         return at;
     };
+
     if at_without_margin > stale_boundary {
         detected_at.checked_add(margin).unwrap_or(at)
     } else {
@@ -460,21 +494,26 @@ fn resolve_today(
 ) -> Option<Timestamp> {
     let today = anchor.to_zoned(tz.clone()).date();
     let tomorrow = today.tomorrow().ok()?;
+
     if clock.ambiguous {
         return resolve_today_ambiguous(tz, clock, today, tomorrow, anchor, now);
     }
+
     let today_at = civil_instant(tz, today, clock.hour, clock.minute)?;
     if today_at > anchor {
         return Some(today_at);
     }
+
     let tomorrow_at = civil_instant(tz, tomorrow, clock.hour, clock.minute)?;
     if banner_known {
         return Some(tomorrow_at);
     }
+
     let passed_by = anchor.duration_since(today_at);
     if passed_by > PASSED_CLOCK_ROLLS_TO_TOMORROW_AFTER {
         return Some(tomorrow_at);
     }
+
     Some(today_at)
 }
 
@@ -495,11 +534,13 @@ fn resolve_today_ambiguous(
     if earliest_future.is_some() {
         return earliest_future;
     }
+
     let most_recent_past = today_candidates.iter().copied().max()?;
     let passed_by = now.duration_since(most_recent_past);
     if passed_by < AMBIGUOUS_PAST_GRACE {
         return Some(most_recent_past);
     }
+
     instants_on(tz, clock, tomorrow).into_iter().min()
 }
 
@@ -520,8 +561,10 @@ fn resolve_weekday(
                 return earliest_after_anchor;
             }
         }
+
         date = date.tomorrow().ok()?;
     }
+
     None
 }
 
@@ -541,7 +584,9 @@ fn resolve_month_day(
             nearest_month_day_at_or_after(base, month, day)?
         }
     };
+
     let horizon = now.checked_add(MONTH_DAY_HORIZON).ok()?;
+
     instants_on(tz, clock, date)
         .into_iter()
         .filter(|t| *t > now && *t <= horizon)
@@ -557,6 +602,7 @@ fn nearest_month_day_at_or_after(base: Date, month: i8, day: i8) -> Option<Date>
             }
         }
     }
+
     None
 }
 
@@ -627,6 +673,7 @@ mod tests {
     fn t03_resets_clock_just_passed_wakes_now() {
         let now = "2026-09-08T23:03:00Z";
         let resolved = resolve_msk("resets 2am (Europe/Moscow)", now);
+
         assert_wake_now(&resolved, now);
     }
 
@@ -640,6 +687,7 @@ mod tests {
     fn t05_resets_clock_passed_within_grace_wakes_now() {
         let now = "2026-09-09T10:00:00Z";
         let resolved = resolve_msk("resets 9am", now);
+
         assert_wake_now(&resolved, now);
     }
 
@@ -653,6 +701,7 @@ mod tests {
     fn t07_resets_month_day_in_the_past_falls_back() {
         let now = "2026-08-01T00:00:00Z";
         let resolved = resolve_msk("resets Jul 27, 8am (Europe/Moscow)", now);
+
         assert_fallback(&resolved, now);
     }
 
@@ -696,6 +745,7 @@ mod tests {
     fn t14_resets_clock_in_dst_gap_takes_later() {
         let resolved = resolve_msk("resets 1:30am (Europe/London)", "2026-03-28T22:00:00Z");
         assert_absolute(&resolved, "2026-03-29T01:31:00Z");
+
         let resolved = resolve_msk("resets 2:30am (Europe/London)", "2026-03-28T22:00:00Z");
         assert_absolute(&resolved, "2026-03-29T01:31:00Z");
     }
@@ -782,6 +832,7 @@ mod tests {
     fn t25_try_again_at_full_date_in_the_past_falls_back() {
         let now = "2026-08-01T00:00:00Z";
         let resolved = resolve_msk("try again at Jul 28th, 2026 8:03 PM.", now);
+
         assert_fallback(&resolved, now);
     }
 
@@ -789,6 +840,7 @@ mod tests {
     fn t26_try_again_later_falls_back() {
         let now = "2026-09-09T08:00:00Z";
         let resolved = resolve_msk("Please try again later.", now);
+
         assert_fallback(&resolved, now);
     }
 
@@ -796,6 +848,7 @@ mod tests {
     fn t27_invalid_clock_falls_back() {
         let now = "2026-09-09T08:00:00Z";
         assert_eq!(parse_reset("resets 45:99"), None);
+
         let resolved = resolve_msk("resets 45:99", now);
         assert_fallback(&resolved, now);
     }
@@ -804,6 +857,7 @@ mod tests {
     fn t28_unknown_zone_falls_back() {
         let now = "2026-09-09T08:00:00Z";
         assert_eq!(parse_reset("resets 3pm (Mars/Olympus)"), None);
+
         let resolved = resolve_msk("resets 3pm (Mars/Olympus)", now);
         assert_fallback(&resolved, now);
     }
@@ -816,6 +870,7 @@ mod tests {
             .unwrap();
         let clamped = stale_five_hour_clamp(far, detected_at, MARGIN);
         assert_eq!(clamped, detected_at.checked_add(MARGIN).unwrap());
+
         let near = detected_at
             .checked_add(SignedDuration::from_hours(3))
             .unwrap();
@@ -837,6 +892,7 @@ mod tests {
                 tz: None,
             })
         );
+
         let spec = parse_reset("resets Sunday");
         assert_eq!(
             spec,
@@ -850,6 +906,7 @@ mod tests {
                 tz: None,
             })
         );
+
         let spec = parse_reset("resets 3");
         assert_eq!(
             spec,
@@ -863,6 +920,7 @@ mod tests {
                 tz: None,
             })
         );
+
         let spec = parse_reset("resets Sep 1, 2026 at 12:00am (UTC)");
         assert_eq!(
             spec,
@@ -880,6 +938,7 @@ mod tests {
                 tz: Some(zone("UTC")),
             })
         );
+
         assert_eq!(parse_reset("resets 3 hours"), None);
         assert_eq!(
             parse_reset("wait ~3 min"),
@@ -895,6 +954,7 @@ mod tests {
             let Some(ResetSpec::Wall { date, .. }) = spec else {
                 panic!("{name}: {spec:?}");
             };
+
             let expected = WallDate::MonthDay {
                 month: 9,
                 day: 1,
@@ -902,17 +962,21 @@ mod tests {
             };
             assert_eq!(date, expected, "{name}");
         }
+
         for name in ["Thu", "thur", "Thurs", "THURSDAY"] {
             let spec = parse_reset(&format!("resets {name} 9am"));
             let Some(ResetSpec::Wall { date, .. }) = spec else {
                 panic!("{name}: {spec:?}");
             };
+
             assert_eq!(date, WallDate::Weekday(Weekday::Thursday), "{name}");
         }
+
         let spec = parse_reset("resets tues");
         let Some(ResetSpec::Wall { date, .. }) = spec else {
             panic!("{spec:?}");
         };
+
         assert_eq!(date, WallDate::Weekday(Weekday::Tuesday));
     }
 
@@ -950,6 +1014,7 @@ mod tests {
             x ^= x >> 7;
             x ^= x << 17;
             self.0 = x;
+
             x
         }
 
@@ -976,6 +1041,7 @@ mod tests {
         let year_seconds = 365 * 86_400;
         let host = zone("Europe/Moscow");
         let mut rng = XorShift64(0x9E37_79B9_7F4A_7C15);
+
         for _ in 0..2000 {
             let with_meridiem = rng.below(2) == 0;
             let (hour, ambiguous) = if with_meridiem {
@@ -987,11 +1053,13 @@ mod tests {
                     (_, false) => hour_12,
                     (_, true) => hour_12 + 12,
                 };
+
                 (hour, false)
             } else {
                 let hour = rng.below(24) as u8;
                 (hour, (1..=12).contains(&hour))
             };
+
             let minute = rng.below(60) as u8;
             let tz = zone(zones[rng.below(zones.len() as u64) as usize]);
             let now = year_start
@@ -1007,6 +1075,7 @@ mod tests {
                 tz: Some(tz),
             };
             let resolved = resolve(Some(&spec), now, None, &host, MARGIN, PROBE);
+
             let lower = now.checked_sub(SignedDuration::from_hours(1)).unwrap();
             let upper = now.checked_add(SignedDuration::from_hours(25)).unwrap();
             let upper = upper.checked_add(MARGIN).unwrap();

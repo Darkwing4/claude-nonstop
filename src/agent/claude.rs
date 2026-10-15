@@ -40,6 +40,7 @@ pub fn session_uuid() -> String {
                 "",
                 format!("urandom unavailable ({error}), deriving a session id from the clock"),
             );
+
             let seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
@@ -48,9 +49,11 @@ pub fn session_uuid() -> String {
             bytes.copy_from_slice(&seed.to_le_bytes());
         }
     }
+
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+
     format!(
         "{}-{}-{}-{}-{}",
         &hex[0..8],
@@ -70,6 +73,7 @@ mod tests {
         for command in ["claude", "claude-native", "node", "bun", "2.1.299"] {
             assert!(Claude.is_foreground_command(command), "{command}");
         }
+
         for command in ["bash", "codex", "vim", "1.2", "1.2.x", "1..2"] {
             assert!(!Claude.is_foreground_command(command), "{command}");
         }

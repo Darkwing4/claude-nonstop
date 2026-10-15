@@ -168,16 +168,19 @@ pub fn now_unix() -> u64 {
 
 pub fn read(paths: &Paths) -> Result<Ledger> {
     let path = paths.ledger();
+
     let Some(bytes) = atomic_file::read_optional(&path)? else {
         return Ok(Ledger {
             version: VERSION,
             ..Ledger::default()
         });
     };
+
     let value: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(value) => value,
         Err(error) => return quarantine(paths, error.to_string()),
     };
+
     let sessions = value.get("sessions").and_then(serde_json::Value::as_object);
     let prompts = value.get("prompts").and_then(serde_json::Value::as_array);
     if sessions
@@ -191,6 +194,7 @@ pub fn read(paths: &Paths) -> Result<Ledger> {
             path.display()
         )));
     }
+
     match serde_json::from_value::<Ledger>(value) {
         Ok(ledger) if ledger.version == VERSION => Ok(ledger),
         Ok(ledger) => quarantine(
@@ -207,6 +211,7 @@ fn quarantine(paths: &Paths, reason: String) -> Result<Ledger> {
         .state
         .join(format!("ledger.json.corrupt.{}", now_unix()));
     std::fs::rename(&path, &aside).map_err(|source| Error::io(&path, "quarantine", source))?;
+
     crate::log::line(
         "",
         format!(
@@ -215,6 +220,7 @@ fn quarantine(paths: &Paths, reason: String) -> Result<Ledger> {
             aside.display()
         ),
     );
+
     Ok(Ledger {
         version: VERSION,
         ..Ledger::default()
@@ -235,15 +241,18 @@ pub fn update<T>(paths: &Paths, change: impl FnOnce(&mut Ledger) -> T) -> Result
     let lock = open_lock(&lock_path)?;
     flock(&lock, FlockOperation::LockExclusive)
         .map_err(|source| Error::io(&lock_path, "lock", source.into()))?;
+
     let mut ledger = read(paths)?;
     let outcome = change(&mut ledger);
     ledger.seq += 1;
     ledger.version = VERSION;
+
     let bytes = serde_json::to_vec_pretty(&ledger).map_err(|source| Error::Json {
         path: paths.ledger(),
         source,
     })?;
     atomic_file::write(&paths.ledger(), &bytes, 0o600)?;
+
     Ok(outcome)
 }
 
@@ -257,10 +266,13 @@ pub fn cas(
         let Some(record) = ledger.sessions.get_mut(key) else {
             return false;
         };
+
         if !expect.contains(&record.status) {
             return false;
         }
+
         change(record);
+
         true
     })
 }
@@ -273,13 +285,16 @@ mod tests {
     fn legacy_codex_state_is_rejected_without_quarantine_or_overwrite() {
         let paths = Paths::temp("ledger-legacy-codex");
         paths.ensure_state_dirs().unwrap();
+
         for value in [
             serde_json::json!({"version": VERSION, "sessions": {"old": {"agent": "codex"}}}),
             serde_json::json!({"version": VERSION, "prompts": [{"agent": "codex"}]}),
         ] {
             let bytes = serde_json::to_vec(&value).unwrap();
             std::fs::write(paths.ledger(), &bytes).unwrap();
+
             let error = update(&paths, |book| book.sessions.clear()).unwrap_err();
+
             assert!(error.to_string().contains("unsupported Codex records"));
             assert_eq!(std::fs::read(paths.ledger()).unwrap(), bytes);
             assert!(!std::fs::read_dir(&paths.state).unwrap().any(|entry| {
@@ -290,6 +305,7 @@ mod tests {
                     .contains("corrupt")
             }));
         }
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -297,6 +313,7 @@ mod tests {
     fn update_persists_and_bumps_seq() {
         let paths = Paths::temp("ledger-update");
         paths.ensure_state_dirs().unwrap();
+
         let first = update(&paths, |ledger| {
             ledger.sessions.insert(
                 "s1".to_owned(),
@@ -310,9 +327,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(first, 0);
+
         let ledger = read(&paths).unwrap();
         assert_eq!(ledger.seq, 1);
         assert_eq!(ledger.sessions["s1"].detected_at, 10);
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -320,6 +339,7 @@ mod tests {
     fn cas_rejects_wrong_status_or_missing_record() {
         let paths = Paths::temp("ledger-cas");
         paths.ensure_state_dirs().unwrap();
+
         update(&paths, |ledger| {
             ledger.sessions.insert(
                 "s1".to_owned(),
@@ -330,6 +350,7 @@ mod tests {
             );
         })
         .unwrap();
+
         assert!(!cas(&paths, "s1", &[Status::Resuming], |_| {}).unwrap());
         assert!(
             cas(&paths, "s1", &[Status::Stopped], |record| {
@@ -342,6 +363,7 @@ mod tests {
             Status::Resuming
         );
         assert!(!cas(&paths, "missing", &[Status::Stopped], |_| {}).unwrap());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -350,6 +372,7 @@ mod tests {
         let paths = Paths::temp("ledger-corrupt");
         paths.ensure_state_dirs().unwrap();
         std::fs::write(paths.ledger(), b"{not json").unwrap();
+
         let ledger = read(&paths).unwrap();
         assert!(ledger.sessions.is_empty());
         assert!(std::fs::read_dir(&paths.state).unwrap().any(|entry| {
@@ -359,6 +382,7 @@ mod tests {
                 .to_string_lossy()
                 .starts_with("ledger.json.corrupt.")
         }));
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

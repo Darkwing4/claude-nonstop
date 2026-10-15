@@ -46,28 +46,33 @@ fn main() {
             1
         }
     };
+
     std::process::exit(code);
 }
 
 fn run(cli: Cli) -> Result<i32> {
     let paths = Paths::from_env()?;
+
     match cli.command {
         Command::Daemon => {
             paths.ensure_state_dirs()?;
             log::init(paths.log_file(), "daemon", true);
             let loaded = config::load(&paths)?;
+
             resumer::run(&paths, &loaded.config, true)
         }
         Command::Resumer => {
             paths.ensure_state_dirs()?;
             log::init(paths.log_file(), "resumer", false);
             let loaded = config::load(&paths)?;
+
             resumer::run(&paths, &loaded.config, false)
         }
         Command::Hook => {
             paths.ensure_state_dirs()?;
             log::init(paths.log_file(), "hook", false);
             let loaded = config::load(&paths)?;
+
             hook::run(&paths, &loaded.config, &mut std::io::stdin())
         }
         Command::Install {
@@ -78,42 +83,52 @@ fn run(cli: Cli) -> Result<i32> {
             paths.ensure_state_dirs()?;
             let binary = std::env::current_exe()
                 .map_err(|source| Error::io("claude-nonstop", "resolve", source))?;
+
             for line in install_hook::install(&paths, &binary)? {
                 println!("{line}");
             }
+
             for line in install_retry_limit::install(&paths, max_retries)? {
                 println!("{line}");
             }
+
             if daemon {
                 for line in install_daemon::install(&paths, &binary)? {
                     println!("{line}");
                 }
             }
+
             println!("new Claude Code sessions pick up the hook and the retry limit");
+
             Ok(0)
         }
         Command::Uninstall { purge } => {
             for line in install_hook::uninstall(&paths)? {
                 println!("{line}");
             }
+
             for line in install_retry_limit::uninstall(&paths)? {
                 println!("{line}");
             }
+
             for line in install_daemon::uninstall(&paths)? {
                 println!("{line}");
             }
+
             if purge {
                 if paths.state.is_dir() {
                     std::fs::remove_dir_all(&paths.state)
                         .map_err(|source| Error::io(&paths.state, "remove", source))?;
                     println!("removed {}", paths.state.display());
                 }
+
                 if paths.config_file.is_file() {
                     std::fs::remove_file(&paths.config_file)
                         .map_err(|source| Error::io(&paths.config_file, "remove", source))?;
                     println!("removed {}", paths.config_file.display());
                 }
             }
+
             Ok(0)
         }
         Command::Status { json } => {
@@ -125,11 +140,13 @@ fn run(cli: Cli) -> Result<i32> {
             log::init(paths.log_file(), "cli", false);
             let count = status::resume_now(&paths, &target_of(target))?;
             println!("{count} session(s) woken");
+
             Ok(if count == 0 { 1 } else { 0 })
         }
         Command::Cancel(target) => {
             let count = status::cancel(&paths, &target_of(target))?;
             println!("{count} session(s) cancelled");
+
             Ok(if count == 0 { 1 } else { 0 })
         }
         Command::Message {
@@ -138,16 +155,20 @@ fn run(cli: Cli) -> Result<i32> {
             text,
         } => {
             let message = if clear { None } else { Some(text.join(" ")) };
+
             if message.as_deref().is_some_and(|m| m.trim().is_empty()) {
                 return Err(Error::Invalid("give a message or --clear".to_owned()));
             }
+
             let count = status::set_message(&paths, &target_of(target), message)?;
             println!("{count} session(s) updated");
+
             Ok(if count == 0 { 1 } else { 0 })
         }
         Command::Prompt { action } => prompt_command(&paths, action),
         Command::Doctor(args) => {
             let findings = doctor::run(&paths, args.fix)?;
+
             if args.json {
                 let report = serde_json::json!({ "version": 1, "findings": findings });
                 print_json("doctor", &report)?;
@@ -158,12 +179,15 @@ fn run(cli: Cli) -> Result<i32> {
                     } else {
                         severity_label(finding.severity)
                     };
+
                     println!("[{mark}] {}: {}", finding.id, finding.title);
+
                     if let Some(hint) = &finding.hint {
                         println!("        {hint}");
                     }
                 }
             }
+
             Ok(if doctor::worst(&findings) == doctor::Severity::Error {
                 1
             } else {
@@ -194,6 +218,7 @@ fn prompt_command(paths: &Paths, action: PromptAction) -> Result<i32> {
             log::init(paths.log_file(), "cli", false);
             let loaded = config::load(paths)?;
             let cwd = prompt_queue::cwd_or_current(project)?;
+
             let (when, at_unix) = if now {
                 (ledger::PromptWhen::Now, None)
             } else if let Some(text) = at {
@@ -206,6 +231,7 @@ fn prompt_command(paths: &Paths, action: PromptAction) -> Result<i32> {
             } else {
                 (ledger::PromptWhen::NextReset, None)
             };
+
             let entry = prompt_queue::add(
                 paths,
                 &loaded.config,
@@ -221,10 +247,12 @@ fn prompt_command(paths: &Paths, action: PromptAction) -> Result<i32> {
                 prompt_queue::describe_when(&entry),
                 entry.cwd.display()
             );
+
             Ok(0)
         }
         PromptAction::List { json } => {
             let items = ledger::read(paths)?.prompts;
+
             if json {
                 let report = serde_json::json!({ "version": 1, "prompts": items });
                 print_json("prompts", &report)?;
@@ -241,6 +269,7 @@ fn prompt_command(paths: &Paths, action: PromptAction) -> Result<i32> {
                     );
                 }
             }
+
             Ok(0)
         }
         PromptAction::Remove { id } => {
@@ -253,11 +282,13 @@ fn prompt_command(paths: &Paths, action: PromptAction) -> Result<i32> {
                     "no pending prompt with that id"
                 }
             );
+
             Ok(if removed { 0 } else { 1 })
         }
         PromptAction::Clear => {
             let count = prompt_queue::clear(paths)?;
             println!("{count} prompt(s) removed");
+
             Ok(0)
         }
     }
@@ -273,16 +304,19 @@ fn config_command(paths: &Paths, action: ConfigAction) -> Result<i32> {
             config::set(paths, &key, &value)?;
             let loaded = config::load(paths)?;
             println!("{key} = {}", config::get(&loaded, &key)?);
+
             Ok(0)
         }
         ConfigAction::Get { key } => {
             let loaded = config::load(paths)?;
             println!("{}", config::get(&loaded, &key)?);
+
             Ok(0)
         }
         ConfigAction::List { json } => {
             let loaded = config::load(paths)?;
             let rows = config::list(&loaded)?;
+
             if json {
                 let entries: Vec<serde_json::Value> = rows
                     .iter()
@@ -296,6 +330,7 @@ fn config_command(paths: &Paths, action: ConfigAction) -> Result<i32> {
                     println!("{key:<width$}  {value}  ({})", source_label(*source));
                 }
             }
+
             Ok(0)
         }
     }
@@ -307,6 +342,7 @@ fn print_json(label: &str, report: &serde_json::Value) -> Result<()> {
         source,
     })?;
     println!("{text}");
+
     Ok(())
 }
 

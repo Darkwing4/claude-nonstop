@@ -21,6 +21,7 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
     let resumer_alive = book
         .resumer_pid
         .is_some_and(crate::platform::process::alive);
+
     if json {
         let report = StatusReport {
             version: 1,
@@ -34,6 +35,7 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
             source,
         });
     }
+
     let now = now_unix();
     let mut out = String::new();
     let open = book
@@ -45,11 +47,13 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
         "claude-nonstop: {open} waiting session(s), {} tracked",
         book.sessions.len()
     ));
+
     match (book.resumer_pid, resumer_alive) {
         (Some(pid), true) => out.push_str(&format!("  (resumer pid {pid})\n")),
         (Some(pid), false) => out.push_str(&format!("  (resumer pid {pid} is gone)\n")),
         (None, _) => out.push('\n'),
     }
+
     let mut records: Vec<&SessionRecord> = book.sessions.values().collect();
     records.sort_by_key(|record| (!record.is_open(), record.reset_at));
     for record in records {
@@ -65,17 +69,21 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
             limit_label(record),
             record.cwd.display()
         ));
+
         let mut details = Vec::new();
         if let Some(pane) = &record.pane {
             details.push(pane.to_string());
         }
+
         details.push(format!("via {:?}", record.detected_via).to_lowercase());
+
         if record.is_open() {
             let wait = if record.reset_at > now {
                 format!("in {}", human_wait(record.reset_at - now))
             } else {
                 "due now".to_owned()
             };
+
             details.push(
                 format!(
                     "wake {} ({wait}, {:?})",
@@ -85,28 +93,36 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
                 .to_lowercase(),
             );
         }
+
         details.push(format!("attempts {}", record.attempts));
+
         if let Some(by) = record.resumed_by {
             details.push(format!("resumed by {:?}", by).to_lowercase());
         }
+
         if let Some(error) = &record.last_error {
             details.push(format!("last error: {error}"));
         }
+
         if let Some(message) = &record.resume_message {
             details.push(format!("message: {message:?}"));
         }
+
         out.push_str(&format!("             {}\n", details.join(" · ")));
     }
+
     let pending = book
         .prompts
         .iter()
         .filter(|item| matches!(item.status, PromptStatus::Pending | PromptStatus::Launching))
         .count();
+
     if !book.prompts.is_empty() {
         out.push_str(&format!(
             "\nqueued prompts: {pending} pending, {} total\n",
             book.prompts.len()
         ));
+
         for item in &book.prompts {
             let preview: String = item.prompt.chars().take(60).collect();
             out.push_str(&format!(
@@ -119,6 +135,7 @@ pub fn status(paths: &Paths, json: bool) -> Result<String> {
             ));
         }
     }
+
     Ok(out)
 }
 
@@ -133,17 +150,21 @@ pub fn resume_now(paths: &Paths, target: &Target) -> Result<usize> {
             {
                 continue;
             }
+
             record.status = Status::Stopped;
             record.reset_at = now;
             record.reset_source = ledger::ResetSource::Manual;
             record.last_error = None;
             count += 1;
         }
+
         count
     })?;
+
     if touched > 0 {
         crate::resumer::spawn_if_needed(paths)?;
     }
+
     Ok(touched)
 }
 
@@ -156,6 +177,7 @@ pub fn cancel(paths: &Paths, target: &Target) -> Result<usize> {
                 count += 1;
             }
         }
+
         count
     })
 }
@@ -169,6 +191,7 @@ pub fn set_message(paths: &Paths, target: &Target, message: Option<String>) -> R
                 count += 1;
             }
         }
+
         count
     })
 }

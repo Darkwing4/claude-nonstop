@@ -36,6 +36,7 @@ fn path(paths: &Paths, session_id: &str) -> Result<PathBuf> {
             "session id {session_id:?} is not an id"
         )));
     }
+
     Ok(dir(paths).join(format!("{session_id}.json")))
 }
 
@@ -44,6 +45,7 @@ pub fn load(paths: &Paths, session_id: &str) -> Result<Option<CounterState>> {
     let Some(bytes) = atomic_file::read_optional(&target)? else {
         return Ok(None);
     };
+
     match serde_json::from_slice::<CounterState>(&bytes) {
         Ok(state) => Ok(Some(state)),
         Err(error) => {
@@ -71,6 +73,7 @@ pub fn evaluate(
         }
         None => 0,
     };
+
     if count >= max {
         Ok(Decision::Exhausted { count })
     } else {
@@ -81,6 +84,7 @@ pub fn evaluate(
 pub fn record(paths: &Paths, session_id: &str, transcript: &Path, count: u32) -> Result<()> {
     let target = path(paths, session_id)?;
     crate::paths::create_private_dir(&dir(paths))?;
+
     let offset = std::fs::metadata(transcript)
         .map(|meta| meta.len())
         .map_err(|source| Error::io(transcript, "stat", source))?;
@@ -90,6 +94,7 @@ pub fn record(paths: &Paths, session_id: &str, transcript: &Path, count: u32) ->
         source,
     })?;
     atomic_file::write(&target, &bytes, 0o600)?;
+
     sweep(paths)
 }
 
@@ -116,6 +121,7 @@ fn sweep(paths: &Paths) -> Result<()> {
             }
         }
     }
+
     Ok(())
 }
 
@@ -132,21 +138,25 @@ mod tests {
         };
         std::fs::write(&transcript, user("do X")).unwrap();
         let prompts = ["continue please"];
+
         assert_eq!(
             evaluate(&paths, "abcdef12-1", &transcript, &prompts, 3).unwrap(),
             Decision::Allowed { next: 1 }
         );
+
         record(&paths, "abcdef12-1", &transcript, 1).unwrap();
         assert_eq!(
             evaluate(&paths, "abcdef12-1", &transcript, &prompts, 3).unwrap(),
             Decision::Allowed { next: 2 }
         );
+
         record(&paths, "abcdef12-1", &transcript, 2).unwrap();
         record(&paths, "abcdef12-1", &transcript, 3).unwrap();
         assert_eq!(
             evaluate(&paths, "abcdef12-1", &transcript, &prompts, 3).unwrap(),
             Decision::Exhausted { count: 3 }
         );
+
         let mut text = std::fs::read_to_string(&transcript).unwrap();
         text.push_str(&user("continue please"));
         text.push_str(&serde_json::json!({"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}).to_string());
@@ -156,7 +166,9 @@ mod tests {
             evaluate(&paths, "abcdef12-1", &transcript, &prompts, 3).unwrap(),
             Decision::Allowed { next: 1 }
         );
+
         assert!(evaluate(&paths, "../escape", &transcript, &prompts, 3).is_err());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

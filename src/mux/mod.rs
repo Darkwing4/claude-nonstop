@@ -27,6 +27,7 @@ impl PaneAddress {
                 pane_id,
             });
         }
+
         if let Some(pane) = env.get("TMUX_PANE") {
             if !pane.is_empty() {
                 return Some(PaneAddress::Tmux {
@@ -34,6 +35,7 @@ impl PaneAddress {
                 });
             }
         }
+
         None
     }
 
@@ -83,6 +85,7 @@ mod tests {
     fn pane_address_comes_from_zellij_or_tmux_env() {
         let mut env = BTreeMap::new();
         assert_eq!(PaneAddress::from_env(&env), None);
+
         env.insert("TMUX_PANE".to_owned(), "%3".to_owned());
         assert_eq!(
             PaneAddress::from_env(&env),
@@ -90,6 +93,7 @@ mod tests {
                 pane_id: "%3".to_owned()
             })
         );
+
         env.insert("ZELLIJ_SESSION_NAME".to_owned(), "work".to_owned());
         env.insert("ZELLIJ_PANE_ID".to_owned(), "7".to_owned());
         assert_eq!(
@@ -99,6 +103,7 @@ mod tests {
                 pane_id: 7
             })
         );
+
         env.insert("ZELLIJ_PANE_ID".to_owned(), "seven".to_owned());
         assert_eq!(PaneAddress::from_env(&env), None);
     }
@@ -110,6 +115,7 @@ mod tests {
             pane_id: 7,
         };
         let json = serde_json::to_string(&pane).unwrap();
+
         assert_eq!(json, r#"{"mux":"zellij","session":"work","pane_id":7}"#);
         assert_eq!(serde_json::from_str::<PaneAddress>(&json).unwrap(), pane);
     }

@@ -35,6 +35,7 @@ impl TranscriptWatch {
         let root_source = reactor
             .watch_dir(&root)
             .map_err(|source| Error::io(&root, "watch", source))?;
+
         let mut watch = TranscriptWatch {
             overload: overload.clone(),
             root: root.clone(),
@@ -50,6 +51,7 @@ impl TranscriptWatch {
                 watch.add_dir(reactor, &entry.path());
             }
         }
+
         log::line(
             "",
             format!(
@@ -58,6 +60,7 @@ impl TranscriptWatch {
                 root.display()
             ),
         );
+
         Ok(watch)
     }
 
@@ -71,6 +74,7 @@ impl TranscriptWatch {
                         self.offsets.insert(path, size);
                     }
                 }
+
                 self.dirs.insert(source, dir.to_path_buf());
             }
             Err(error) => log::line(
@@ -87,19 +91,24 @@ impl TranscriptWatch {
         let Wake::DirEntry(source, name) = wake else {
             return Ok(Vec::new());
         };
+
         if *source == self.root_source {
             let candidate = self.root.join(name);
             if candidate.is_dir() && !self.dirs.values().any(|dir| *dir == candidate) {
                 self.add_dir(reactor, &candidate);
             }
+
             return Ok(Vec::new());
         }
+
         let Some(dir) = self.dirs.get(source).cloned() else {
             return Ok(Vec::new());
         };
+
         if !is_transcript(name) {
             return Ok(Vec::new());
         }
+
         let path = dir.join(name);
         self.read_new_records(&path)
     }
@@ -113,9 +122,11 @@ impl TranscriptWatch {
             }
             Err(source) => return Err(Error::io(path, "stat", source)),
         };
+
         let offset = self.offsets.get(path).copied().unwrap_or(0);
         let start = if size < offset { 0 } else { offset };
         let bytes = read_range(path, start, size)?;
+
         let complete = bytes
             .iter()
             .rposition(|byte| *byte == b'\n')
@@ -123,12 +134,14 @@ impl TranscriptWatch {
             .unwrap_or(0);
         self.offsets
             .insert(path.to_path_buf(), start + complete as u64);
+
         let mut seen = Vec::new();
         for raw in bytes[..complete].split(|byte| *byte == b'\n') {
             let Some((record, limit)) = transcript_claude::parse_limit_line(raw, &self.overload)
             else {
                 continue;
             };
+
             let session_id = record
                 .get("sessionId")
                 .and_then(serde_json::Value::as_str)
@@ -143,6 +156,7 @@ impl TranscriptWatch {
                 .and_then(serde_json::Value::as_str)
                 .map(PathBuf::from)
                 .unwrap_or_default();
+
             seen.push(LimitSeen {
                 session_id,
                 cwd,
@@ -150,6 +164,7 @@ impl TranscriptWatch {
                 record: limit,
             });
         }
+
         Ok(seen)
     }
 }
@@ -165,10 +180,12 @@ fn read_range(path: &Path, start: u64, end: u64) -> Result<Vec<u8>> {
     let mut file = std::fs::File::open(path).map_err(|source| Error::io(path, "open", source))?;
     file.seek(SeekFrom::Start(start))
         .map_err(|source| Error::io(path, "seek", source))?;
+
     let mut bytes = Vec::new();
     file.take(end.saturating_sub(start))
         .read_to_end(&mut bytes)
         .map_err(|source| Error::io(path, "read", source))?;
+
     Ok(bytes)
 }
 
@@ -188,35 +205,44 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let transcript = dir.join("s-1.jsonl");
         std::fs::write(&transcript, limit_line("2026-09-03T06:00:00.000Z")).unwrap();
+
         let mut reactor = Reactor::new().unwrap();
         let mut watch =
             TranscriptWatch::start(&mut reactor, &paths, &crate::config::Overload::default())
                 .unwrap();
+
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&transcript)
             .unwrap();
         file.write_all(limit_line("2026-09-03T06:43:54.740Z").as_bytes())
             .unwrap();
+
         let mut seen = Vec::new();
         for _ in 0..3 {
             for wake in reactor.wait().unwrap() {
                 seen.extend(watch.on_wake(&wake, &mut reactor).unwrap());
             }
+
             if !seen.is_empty() {
                 break;
             }
         }
+
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].session_id, "s-1");
         assert_eq!(seen[0].cwd, PathBuf::from("/home/me/proj"));
         assert_eq!(seen[0].record.at, 1788417834);
+
         let new_dir = paths.claude_projects_dir().join("-home-me-other");
         std::fs::create_dir(&new_dir).unwrap();
+
         for wake in reactor.wait().unwrap() {
             watch.on_wake(&wake, &mut reactor).unwrap();
         }
+
         assert!(watch.dirs.values().any(|dir| *dir == new_dir));
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

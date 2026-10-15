@@ -36,9 +36,12 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let mut reactor = Reactor::new().unwrap();
         let id = reactor.watch_dir(&dir).unwrap();
+
         fs::write(dir.join("marker.json"), "{}").unwrap();
         let wakes = reactor.wait().unwrap();
+
         assert!(wakes.iter().any(|wake| matches!(wake, Wake::DirEntry(seen, name) if *seen == id && name == "marker.json")), "{wakes:?}");
+
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -47,7 +50,9 @@ mod tests {
         let mut child = std::process::Command::new("true").spawn().unwrap();
         let mut reactor = Reactor::new().unwrap();
         let id = reactor.watch_process(child.id()).unwrap();
+
         let wakes = reactor.wait().unwrap();
+
         assert_eq!(wakes, vec![Wake::ProcessExited(id)]);
         assert!(child.wait().unwrap().success());
     }
@@ -58,8 +63,10 @@ mod tests {
         reactor
             .set_deadline(Some(SystemTime::now() + Duration::from_millis(50)))
             .unwrap();
+
         let started = Instant::now();
         let wakes = reactor.wait().unwrap();
+
         assert_eq!(wakes, vec![Wake::Deadline]);
         assert!(started.elapsed() >= Duration::from_millis(40));
     }
@@ -70,6 +77,7 @@ mod tests {
         reactor
             .set_deadline(Some(UNIX_EPOCH + Duration::from_secs(1)))
             .unwrap();
+
         assert_eq!(reactor.wait().unwrap(), vec![Wake::Deadline]);
     }
 

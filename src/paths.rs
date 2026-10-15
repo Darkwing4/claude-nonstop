@@ -20,6 +20,7 @@ impl Paths {
             xdg("XDG_CONFIG_HOME", &home, ".config").join("claude-nonstop/config.toml")
         });
         let claude_config = env_path("CLAUDE_CONFIG_DIR").unwrap_or_else(|| home.join(".claude"));
+
         Ok(Paths {
             home,
             state,
@@ -74,6 +75,7 @@ impl Paths {
             claude_config: home.join(".claude"),
         };
         std::fs::create_dir_all(&paths.claude_config).unwrap();
+
         paths
     }
 
@@ -81,6 +83,7 @@ impl Paths {
         for dir in [self.state.clone(), self.headless_dir(), self.log_dir()] {
             create_private_dir(&dir)?;
         }
+
         Ok(())
     }
 }

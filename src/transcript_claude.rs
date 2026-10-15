@@ -17,9 +17,11 @@ pub fn classify_user_record(record: &Value, prompts: &[&str]) -> Option<UserReco
     if record.get("type").and_then(Value::as_str) != Some("user") {
         return None;
     }
+
     if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
         return None;
     }
+
     let content = record
         .get("message")
         .and_then(|message| message.get("content"))?;
@@ -30,16 +32,19 @@ pub fn classify_user_record(record: &Value, prompts: &[&str]) -> Option<UserReco
             UserRecord::UserPrompt
         });
     }
+
     let blocks = content.as_array()?;
     if blocks.is_empty() {
         return None;
     }
+
     if blocks
         .iter()
         .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
     {
         return Some(UserRecord::ToolResult);
     }
+
     let texts: Vec<&str> = blocks
         .iter()
         .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
@@ -48,6 +53,7 @@ pub fn classify_user_record(record: &Value, prompts: &[&str]) -> Option<UserReco
     if texts.is_empty() {
         return None;
     }
+
     let joined = texts.join("\n");
     Some(if is_prompt(&joined, prompts) {
         UserRecord::OurPrompt
@@ -66,6 +72,7 @@ pub fn progressed_since(path: &Path, offset: u64, prompts: &[&str]) -> io::Resul
     if offset > size {
         return Ok(true);
     }
+
     let start = offset.max(size.saturating_sub(SCAN_BYTES));
     let kinds = kinds_after(path, start, start > offset, prompts)?;
     let is_progress = |kind: &Option<UserRecord>| {
@@ -93,16 +100,19 @@ fn kinds_after(
     prompts: &[&str],
 ) -> io::Result<Vec<Option<UserRecord>>> {
     let data = read_from_line_boundary(path, start, drop_partial_first)?;
+
     let mut kinds = Vec::new();
     for raw in data.split(|byte| *byte == b'\n') {
         if raw.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
+
         match serde_json::from_slice::<Value>(raw) {
             Ok(record) => kinds.push(classify_user_record(&record, prompts)),
             Err(_) => continue,
         }
     }
+
     Ok(kinds)
 }
 
@@ -144,6 +154,7 @@ pub fn latest_limit_record(
         .split(|byte| *byte == b'\n')
         .rev()
         .find_map(|raw| parse_limit_line(raw, overload));
+
     Ok(latest.map(|(_, found)| found))
 }
 
@@ -157,6 +168,7 @@ pub fn parse_limit_line(
 
     let record = serde_json::from_slice::<Value>(raw).ok()?;
     let found = classify_limit_record(&record, overload)?;
+
     Some((record, found))
 }
 
@@ -167,21 +179,26 @@ fn classify_limit_record(
     if record.get("type").and_then(Value::as_str) != Some("assistant") {
         return None;
     }
+
     if record.get("isApiErrorMessage").and_then(Value::as_bool) != Some(true) {
         return None;
     }
+
     if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
         return None;
     }
+
     if record.get("error").and_then(Value::as_str) != Some("rate_limit") {
         return None;
     }
+
     let text = record_text(record);
     if crate::hook::classify("rate_limit", Some(&text), overload)
         != crate::hook::HookKind::RateLimit
     {
         return None;
     }
+
     let at = record_timestamp(record).unwrap_or(0);
     Some(LimitRecord {
         at,
@@ -195,32 +212,40 @@ pub fn limit_kind(text: &str) -> crate::ledger::LimitType {
     if lowered.contains("/usage-credits") || lowered.contains("switch models") {
         return crate::ledger::LimitType::Model;
     }
+
     if lowered.contains("week") {
         return crate::ledger::LimitType::Weekly;
     }
+
     if lowered.contains("session limit") || lowered.contains("-hour limit") {
         return crate::ledger::LimitType::FiveHour;
     }
+
     crate::ledger::LimitType::Unknown
 }
 
 pub fn progressed_after(path: &Path, since: u64) -> io::Result<bool> {
     let start = std::fs::metadata(path)?.len().saturating_sub(SCAN_BYTES);
     let data = read_from_line_boundary(path, start, start > 0)?;
+
     for raw in data.split(|byte| *byte == b'\n').rev() {
         let Ok(record) = serde_json::from_slice::<Value>(raw) else {
             continue;
         };
+
         let Some(at) = record_timestamp(&record) else {
             continue;
         };
+
         if at <= since {
             break;
         }
+
         if is_progress_record(&record) {
             return Ok(true);
         }
     }
+
     Ok(false)
 }
 
@@ -228,6 +253,7 @@ fn is_progress_record(record: &Value) -> bool {
     if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
         return false;
     }
+
     match record.get("type").and_then(Value::as_str) {
         Some("user") => record
             .pointer("/message/content")
@@ -241,6 +267,7 @@ fn is_progress_record(record: &Value) -> bool {
             if record.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true) {
                 return false;
             }
+
             let usage = record.pointer("/message/usage");
             let total: u64 = [
                 "input_tokens",
@@ -255,6 +282,7 @@ fn is_progress_record(record: &Value) -> bool {
                     .and_then(Value::as_u64)
             })
             .sum();
+
             total > 0
         }
         _ => false,
@@ -276,6 +304,7 @@ fn record_text(record: &Value) -> String {
 pub fn record_timestamp(record: &Value) -> Option<u64> {
     let stamp = record.get("timestamp").and_then(Value::as_str)?;
     let parsed: jiff::Timestamp = stamp.parse().ok()?;
+
     u64::try_from(parsed.as_second()).ok()
 }
 
@@ -319,6 +348,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+
         path
     }
 
@@ -332,8 +362,10 @@ mod tests {
     fn retry_prompt_partial_output_and_errors_are_not_progress() {
         let path = transcript("progress.jsonl", &[user("do X"), assistant("part"), lost()]);
         let offset = std::fs::metadata(&path).unwrap().len();
+
         append(&path, &[user(RETRY), assistant("more"), lost()]);
         assert!(!progressed_since(&path, offset, &[RETRY]).unwrap());
+
         append(
             &path,
             &[user(RETRY), assistant("calling"), tool_result(), lost()],
@@ -345,6 +377,7 @@ mod tests {
     fn fresh_user_prompt_after_retry_is_progress() {
         let path = transcript("prompt.jsonl", &[user("do X"), lost()]);
         let offset = std::fs::metadata(&path).unwrap().len();
+
         append(&path, &[user(RETRY), lost(), user("go on"), lost()]);
         assert!(progressed_since(&path, offset, &[RETRY]).unwrap());
     }
@@ -353,6 +386,7 @@ mod tests {
     fn noise_records_are_ignored() {
         let path = transcript("noise.jsonl", &[user("do X"), lost()]);
         let offset = std::fs::metadata(&path).unwrap().len();
+
         append(
             &path,
             &[
@@ -365,6 +399,7 @@ mod tests {
             ],
         );
         assert!(!progressed_since(&path, offset, &[RETRY]).unwrap());
+
         assert!(
             progressed_since(
                 &path,
@@ -379,8 +414,10 @@ mod tests {
     fn late_flushed_records_and_missing_retry_are_not_progress() {
         let path = transcript("late.jsonl", &[]);
         let offset = std::fs::metadata(&path).unwrap().len();
+
         append(&path, &[user("do X"), lost()]);
         assert!(!progressed_since(&path, offset, &[RETRY]).unwrap());
+
         append(&path, &[user(RETRY), lost()]);
         assert!(!progressed_since(&path, offset, &[RETRY]).unwrap());
     }
@@ -388,6 +425,7 @@ mod tests {
     #[test]
     fn records_classify_by_content() {
         let parse = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+
         assert_eq!(
             classify_user_record(&parse(&user_blocks("plain")), &[RETRY]),
             Some(UserRecord::UserPrompt)
@@ -420,6 +458,7 @@ mod tests {
         overload
             .message_contains
             .push("upstream pool exhausted".to_owned());
+
         for text in [
             "API Error: Server is temporarily limiting requests (not your usage limit) · only reserved subscriptions are left and their shared part is used up",
             "UPSTREAM POOL EXHAUSTED",
@@ -427,6 +466,7 @@ mod tests {
             let raw = limit(text, "2026-09-03T06:43:54.740Z");
             let record = serde_json::from_str(&raw).unwrap();
             assert!(classify_limit_record(&record, &overload).is_none());
+
             let file = transcript("capacity.jsonl", &[raw]);
             assert!(latest_limit_record(&file, &overload).unwrap().is_none());
         }
@@ -456,12 +496,14 @@ mod tests {
                 ),
             ],
         );
+
         let found = latest_limit_record(&file, &crate::config::Overload::default())
             .unwrap()
             .unwrap();
         assert_eq!(found.kind, LimitType::FiveHour);
         assert!(found.text.contains("resets 5:30pm"));
         assert_eq!(found.at, 1788417834);
+
         assert_eq!(
             limit_kind("You've hit your weekly limit · resets Aug 31, 12pm"),
             LimitType::Weekly
@@ -474,6 +516,7 @@ mod tests {
             limit_kind("You've reached your Fable limit. Run /usage-credits"),
             LimitType::Model
         );
+
         assert!(
             latest_limit_record(
                 &transcript("none.jsonl", &[worked("2026-09-03T06:00:00.000Z")]),
@@ -496,8 +539,10 @@ mod tests {
                 ),
             ],
         );
+
         assert!(!progressed_after(&file, 1788417834).unwrap());
         assert!(progressed_after(&file, 1788415000).unwrap());
+
         let mut text = std::fs::read_to_string(&file).unwrap();
         text.push_str(&worked("2026-09-03T07:00:00.000Z"));
         text.push('\n');

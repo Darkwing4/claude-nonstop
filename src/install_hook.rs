@@ -19,6 +19,7 @@ fn is_generated(command: &str) -> bool {
     let Some(rest) = command.strip_prefix("test -x ") else {
         return false;
     };
+
     let Some((binary, _)) = rest.split_once(" && ") else {
         return false;
     };
@@ -30,6 +31,7 @@ pub fn install(paths: &Paths, binary: &Path) -> Result<Vec<String>> {
     let settings_path = paths.claude_settings();
     let mut messages = Vec::new();
     let (mut settings, existed) = read_settings(&settings_path)?;
+
     if existed {
         let backup = backup_path(&settings_path);
         if !backup.exists() {
@@ -56,29 +58,36 @@ pub fn install(paths: &Paths, binary: &Path) -> Result<Vec<String>> {
         let before = groups.len();
         prune_ours(groups);
         groups.push(json!({ "hooks": [{ "type": "command", "command": hook_command(binary), "timeout": HOOK_TIMEOUT }] }));
+
         (before, groups.len())
     };
+
     write_settings(&settings_path, &settings, existed)?;
     messages.push(format!(
         "StopFailure hook {} in {}",
         if before == after { "updated" } else { "added" },
         settings_path.display()
     ));
+
     Ok(messages)
 }
 
 pub fn uninstall(paths: &Paths) -> Result<Vec<String>> {
     let settings_path = paths.claude_settings();
     let (mut settings, existed) = read_settings(&settings_path)?;
+
     if !existed {
         return Ok(Vec::new());
     }
+
     let had = installed_commands(&settings).len();
     if had == 0 {
         return Ok(Vec::new());
     }
+
     let groups = stop_failure_groups(&mut settings);
     prune_ours(groups);
+
     let hooks = settings.get_mut("hooks").and_then(Value::as_object_mut);
     if let Some(hooks) = hooks {
         if hooks
@@ -88,11 +97,14 @@ pub fn uninstall(paths: &Paths) -> Result<Vec<String>> {
         {
             hooks.remove("StopFailure");
         }
+
         if hooks.is_empty() {
             settings.remove("hooks");
         }
     }
+
     write_settings(&settings_path, &settings, true)?;
+
     Ok(vec![format!(
         "StopFailure hook removed from {}",
         settings_path.display()
@@ -124,10 +136,12 @@ pub fn read_settings(path: &Path) -> Result<(Map<String, Value>, bool)> {
     let Some(bytes) = atomic_file::read_optional(path)? else {
         return Ok((Map::new(), false));
     };
+
     let value: Value = serde_json::from_slice(&bytes).map_err(|source| Error::Json {
         path: path.to_path_buf(),
         source,
     })?;
+
     match value {
         Value::Object(map) => Ok((map, true)),
         _ => Err(Error::Invalid(format!(
@@ -144,6 +158,7 @@ fn stop_failure_groups(settings: &mut Map<String, Value>) -> &mut Vec<Value> {
     if !hooks.is_object() {
         *hooks = Value::Object(Map::new());
     }
+
     let groups = hooks
         .as_object_mut()
         .expect("hooks is an object")
@@ -152,6 +167,7 @@ fn stop_failure_groups(settings: &mut Map<String, Value>) -> &mut Vec<Value> {
     if !groups.is_array() {
         *groups = Value::Array(Vec::new());
     }
+
     groups.as_array_mut().expect("StopFailure is an array")
 }
 
@@ -166,6 +182,7 @@ fn prune_ours(groups: &mut Vec<Value>) {
             });
         }
     }
+
     groups.retain(|group| {
         group
             .get("hooks")
@@ -181,6 +198,7 @@ pub fn write_settings(path: &Path, settings: &Map<String, Value>, existed: bool)
                 .map_err(|source| Error::io(parent, "create", source))?;
         }
     }
+
     let mut text =
         serde_json::to_string_pretty(&Value::Object(settings.clone())).map_err(|source| {
             Error::Json {
@@ -190,12 +208,14 @@ pub fn write_settings(path: &Path, settings: &Map<String, Value>, existed: bool)
         })?;
     text.push('\n');
     let mode = if existed { mode_of(path) } else { 0o600 };
+
     atomic_file::write(path, text.as_bytes(), mode)
 }
 
 fn backup_path(settings_path: &Path) -> PathBuf {
     let mut name = settings_path.as_os_str().to_owned();
     name.push(".claude-nonstop-orig");
+
     PathBuf::from(name)
 }
 
@@ -254,8 +274,10 @@ mod tests {
         let paths = Paths::temp("install-hook-append");
         let settings = paths.claude_settings();
         std::fs::write(&settings, EXISTING).unwrap();
+
         install(&paths, Path::new("/usr/local/bin/claude-nonstop")).unwrap();
         install(&paths, Path::new("/opt/bin/claude-nonstop")).unwrap();
+
         let (map, _) = read_settings(&settings).unwrap();
         let groups = map["hooks"]["StopFailure"].as_array().unwrap();
         assert_eq!(groups.len(), 3);
@@ -272,19 +294,24 @@ mod tests {
             "test -x /opt/bin/claude-nonstop && /opt/bin/claude-nonstop hook || exit 0"
         );
         assert!(groups[2].get("matcher").is_none());
+
         let keys: Vec<&String> = map.keys().collect();
         assert_eq!(keys, vec!["permissions", "hooks", "theme"]);
         assert_eq!(
             std::fs::read_to_string(backup_path(&settings)).unwrap(),
             EXISTING
         );
+
         let text = std::fs::read_to_string(&settings).unwrap();
         assert!(text.ends_with("}\n"));
         assert!(text.contains("\n  \"permissions\": {\n    \"defaultMode\": \"auto\"\n  },"));
+
         uninstall(&paths).unwrap();
+
         let (map, _) = read_settings(&settings).unwrap();
         assert_eq!(map["hooks"]["StopFailure"].as_array().unwrap().len(), 2);
         assert!(installed_commands(&map).is_empty());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -305,6 +332,7 @@ mod tests {
 
         let (map, _) = read_settings(&settings).unwrap();
         assert_eq!(installed_commands(&map), vec![custom.to_owned()]);
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -312,13 +340,18 @@ mod tests {
     fn missing_settings_file_is_created_and_fully_removed_on_uninstall() {
         let paths = Paths::temp("install-hook-fresh");
         let settings = paths.claude_settings();
+
         install(&paths, Path::new("/bin/claude-nonstop")).unwrap();
+
         let (map, _) = read_settings(&settings).unwrap();
         assert_eq!(installed_commands(&map).len(), 1);
         assert!(!backup_path(&settings).exists());
+
         uninstall(&paths).unwrap();
+
         let (map, _) = read_settings(&settings).unwrap();
         assert!(map.get("hooks").is_none());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -327,8 +360,10 @@ mod tests {
         let paths = Paths::temp("install-hook-invalid");
         let settings = paths.claude_settings();
         std::fs::write(&settings, "{not json").unwrap();
+
         assert!(install(&paths, Path::new("/bin/claude-nonstop")).is_err());
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{not json");
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

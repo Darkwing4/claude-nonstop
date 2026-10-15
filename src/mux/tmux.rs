@@ -25,6 +25,7 @@ impl Tmux {
 impl Multiplexer for Tmux {
     fn pane_alive(&self, pane: &PaneAddress) -> Result<bool> {
         let id = Self::id(pane)?;
+
         match Self::run(&["display-message", "-t", id, "-p", "#{pane_id}"]) {
             Ok(output) => Ok(output.trim() == id),
             Err(Error::Command { .. }) => Ok(false),
@@ -36,6 +37,7 @@ impl Multiplexer for Tmux {
         let id = Self::id(pane)?;
         let output = Self::run(&["display-message", "-t", id, "-p", "#{pane_current_command}"])?;
         let command = output.trim();
+
         Ok(if command.is_empty() {
             None
         } else {
@@ -45,6 +47,7 @@ impl Multiplexer for Tmux {
 
     fn capture(&self, pane: &PaneAddress, full: bool) -> Result<String> {
         let id = Self::id(pane)?;
+
         if full {
             Self::run(&["capture-pane", "-t", id, "-p", "-S", "-"])
         } else {
@@ -59,11 +62,13 @@ impl Multiplexer for Tmux {
 
     fn send_key(&self, pane: &PaneAddress, key: Key) -> Result<()> {
         let id = Self::id(pane)?;
+
         let name = match key {
             Key::Enter => "Enter",
             Key::Up => "Up",
             Key::Down => "Down",
         };
+
         Self::run(&["send-keys", "-t", id, name]).map(|_| ())
     }
 }
@@ -85,6 +90,7 @@ impl Tmux {
                 session.into(),
             ]
         };
+
         args.extend([
             "-c".into(),
             cwd.display().to_string(),
@@ -96,15 +102,18 @@ impl Tmux {
         for arg in argv {
             args.push(arg.to_string_lossy().into_owned());
         }
+
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         let output = Self::run(&borrowed)?;
         let pane_id = output.trim().to_owned();
+
         if !pane_id.starts_with('%') {
             return Err(Error::command(
                 "tmux",
                 format!("new window did not report a pane id: {output:?}"),
             ));
         }
+
         Ok(PaneAddress::Tmux { pane_id })
     }
 }

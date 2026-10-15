@@ -14,6 +14,7 @@ pub fn write(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
         .and_then(|name| name.to_str())
         .unwrap_or("file");
     let tmp = parent.join(format!(".{name}.{}.tmp", std::process::id()));
+
     let result = OpenOptions::new()
         .write(true)
         .create(true)
@@ -25,6 +26,7 @@ pub fn write(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
             file.sync_all()
         })
         .and_then(|()| fs::rename(&tmp, path));
+
     match result {
         Ok(()) => Ok(()),
         Err(source) => {
@@ -36,6 +38,7 @@ pub fn write(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
                     );
                 }
             }
+
             Err(Error::io(path, "write", source))
         }
     }
@@ -60,6 +63,7 @@ mod tests {
             std::env::temp_dir().join(format!("claude-nonstop-atomic-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state.json");
+
         write(&path, b"{}", 0o600).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"{}");
         assert_eq!(
@@ -69,6 +73,7 @@ mod tests {
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         assert_eq!(read_optional(&path).unwrap(), Some(b"{}".to_vec()));
         assert_eq!(read_optional(&dir.join("missing")).unwrap(), None);
+
         fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -26,33 +26,39 @@ pub fn by_session_id(paths: &Paths, session_id: &str) -> Result<Option<SessionEn
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(Error::io(&dir, "read", source)),
     };
+
     for entry in entries {
         let entry = entry.map_err(|source| Error::io(&dir, "read", source))?;
         let path = entry.path();
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
+
         let Ok(bytes) = fs::read(&path) else {
             continue;
         };
+
         if let Ok(parsed) = serde_json::from_slice::<SessionEntry>(&bytes) {
             if parsed.session_id == session_id {
                 return Ok(Some(parsed));
             }
         }
     }
+
     Ok(None)
 }
 
 pub fn transcript_path(paths: &Paths, session_id: &str) -> Option<PathBuf> {
     let projects = paths.claude_projects_dir();
     let entries = fs::read_dir(&projects).ok()?;
+
     for entry in entries.flatten() {
         let candidate = entry.path().join(format!("{session_id}.jsonl"));
         if candidate.is_file() {
             return Some(candidate);
         }
     }
+
     None
 }
 
@@ -67,11 +73,13 @@ pub fn display_name(paths: &Paths, session_id: &str, fallback: &str) -> String {
             }
         }
     }
+
     if let Some(path) = transcript_path(paths, session_id) {
         if let Some(title) = transcript_title(&path) {
             return title;
         }
     }
+
     derived.unwrap_or_else(|| fallback.to_owned())
 }
 
@@ -85,9 +93,11 @@ fn transcript_title(path: &Path) -> Option<String> {
         if !has_custom && !has_ai {
             continue;
         }
+
         let Ok(record) = serde_json::from_slice::<serde_json::Value>(&line) else {
             continue;
         };
+
         match record.get("type").and_then(serde_json::Value::as_str) {
             Some("custom-title") => {
                 custom = record
@@ -106,6 +116,7 @@ fn transcript_title(path: &Path) -> Option<String> {
             _ => {}
         }
     }
+
     custom
         .filter(|title| !title.is_empty())
         .or(ai.filter(|title| !title.is_empty()))
@@ -124,10 +135,12 @@ mod tests {
         fs::write(sessions.join("100.json"), r#"{"pid":100,"sessionId":"s-custom","cwd":"/home/me/proj","name":"My task","nameSource":"custom"}"#).unwrap();
         fs::write(sessions.join("101.json"), r#"{"pid":101,"sessionId":"s-derived","cwd":"/home/me/proj","name":"proj-1a","nameSource":"derived"}"#).unwrap();
         fs::write(sessions.join("102.key"), "not json").unwrap();
+
         let entry = by_session_id(&paths, "s-custom").unwrap().unwrap();
         assert_eq!(entry.pid, 100);
         assert!(by_session_id(&paths, "s-missing").unwrap().is_none());
         assert_eq!(display_name(&paths, "s-custom", "pane 7"), "My task");
+
         let transcript = paths
             .claude_projects_dir()
             .join("-home-me-proj/s-derived.jsonl");
@@ -137,15 +150,18 @@ mod tests {
             Some(transcript.clone())
         );
         assert_eq!(display_name(&paths, "s-derived", "pane 7"), "Mine");
+
         fs::write(
             &transcript,
             "{\"type\":\"ai-title\",\"aiTitle\":\"Model title\"}\n",
         )
         .unwrap();
         assert_eq!(display_name(&paths, "s-derived", "pane 7"), "Model title");
+
         fs::write(&transcript, "{\"type\":\"user\"}\n").unwrap();
         assert_eq!(display_name(&paths, "s-derived", "pane 7"), "proj-1a");
         assert_eq!(display_name(&paths, "s-unknown", "pane 7"), "pane 7");
+
         fs::remove_dir_all(&paths.home).unwrap();
     }
 }

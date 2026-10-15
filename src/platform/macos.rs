@@ -62,6 +62,7 @@ impl Reactor {
             VnodeEvents::WRITE | VnodeEvents::DELETE | VnodeEvents::RENAME,
         )?;
         let snapshot = list_directory(path)?;
+
         Ok(self.register(Source::Dir {
             fd,
             path: path.to_path_buf(),
@@ -81,11 +82,13 @@ impl Reactor {
             ptr::null_mut(),
         );
         self.submit(event)?;
+
         Ok(self.register(Source::Process { pid }))
     }
 
     pub fn set_deadline(&mut self, at: Option<SystemTime>) -> io::Result<()> {
         self.deadline = at;
+
         match at {
             Some(at) => self.arm_timer(at),
             None => self.disarm_timer(),
@@ -101,6 +104,7 @@ impl Reactor {
                 Err(error) => return Err(error.into()),
             }
         };
+
         let mut wakes = Vec::new();
         for event in events {
             match event.filter() {
@@ -118,6 +122,7 @@ impl Reactor {
                 _ => {}
             }
         }
+
         Ok(wakes)
     }
 
@@ -125,6 +130,7 @@ impl Reactor {
         let id = SourceId(self.next_id);
         self.next_id += 1;
         self.sources.insert(id, source);
+
         id
     }
 
@@ -164,6 +170,7 @@ impl Reactor {
             EventFlags::ADD | EventFlags::ONESHOT,
             ptr::null_mut(),
         );
+
         self.submit(event)
     }
 
@@ -176,6 +183,7 @@ impl Reactor {
             EventFlags::DELETE,
             ptr::null_mut(),
         );
+
         match self.submit(event) {
             Ok(()) => Ok(()),
             Err(error) if error.raw_os_error() == Some(rustix::io::Errno::NOENT.raw_os_error()) => {
@@ -195,13 +203,16 @@ impl Reactor {
             Source::Dir { fd, .. } if fd.as_raw_fd() == vnode => Some(*id),
             _ => None,
         });
+
         let Some(id) = found else {
             return Ok(());
         };
+
         if flags.intersects(VnodeEvents::DELETE | VnodeEvents::RENAME | VnodeEvents::REVOKE) {
             self.sources.remove(&id);
             return Ok(());
         }
+
         match self.sources.get_mut(&id) {
             Some(Source::Dir { path, snapshot, .. }) if flags.intersects(VnodeEvents::WRITE) => {
                 let current = list_directory(path)?;
@@ -210,10 +221,12 @@ impl Reactor {
                         wakes.push(Wake::DirEntry(id, name.clone()));
                     }
                 }
+
                 *snapshot = current;
             }
             _ => {}
         }
+
         Ok(())
     }
 
@@ -236,11 +249,14 @@ impl Reactor {
         let Some(at) = self.deadline else {
             return Ok(());
         };
+
         if SystemTime::now() < at {
             return self.arm_timer(at);
         }
+
         self.deadline = None;
         wakes.push(Wake::Deadline);
+
         Ok(())
     }
 }
@@ -249,11 +265,14 @@ fn list_directory(path: &Path) -> io::Result<Snapshot> {
     let mut snapshot = Snapshot::new();
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
+
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
+
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         snapshot.insert(entry.file_name(), (metadata.len(), modified));
     }
+
     Ok(snapshot)
 }

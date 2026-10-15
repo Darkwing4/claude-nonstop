@@ -99,6 +99,7 @@ pub fn content_tail(screen: &str, lines: usize) -> Vec<String> {
         .map(|(line, _)| line.trim().to_owned())
         .collect();
     let skip = content.len().saturating_sub(lines);
+
     content[skip..].to_vec()
 }
 
@@ -113,15 +114,18 @@ pub fn rate_limit_menu(screen: &str) -> MenuRead {
     if !MENU_QUESTION.is_match(screen) || !MENU_WAIT_OPTION.is_match(screen) {
         return MenuRead::NoMenu;
     }
+
     if !MENU_CONFIRM.is_match(screen) && !screen.contains('❯') {
         return MenuRead::NoMenu;
     }
+
     let options: Vec<&str> = screen
         .lines()
         .filter(|line| MENU_OPTION.is_match(line))
         .collect();
     let cursor = options.iter().position(|line| line.contains('❯'));
     let wait = options.iter().position(|line| MENU_STOP.is_match(line));
+
     match (cursor, wait) {
         (Some(cursor), Some(wait)) => MenuRead::Steps(wait as i32 - cursor as i32),
         _ => MenuRead::Unreadable,
@@ -132,6 +136,7 @@ fn is_chrome(line: &str) -> bool {
     if is_busy(line) {
         return false;
     }
+
     CHROME.is_match(line)
 }
 
@@ -145,6 +150,7 @@ fn echo_mask(lines: &[&str]) -> Vec<bool> {
             } else if in_echo && !ECHO_CONTINUE.is_match(line) {
                 in_echo = false;
             }
+
             in_echo
         })
         .collect()
@@ -156,7 +162,9 @@ fn find_claude(window: &[String]) -> bool {
         if !is_claude_limit_line(line) {
             return false;
         }
+
         let model_banner = remedy_hinted && MODEL_BANNER.is_match(line);
+
         model_banner || has_reset_near(window, index)
     })
 }
@@ -165,6 +173,7 @@ fn is_claude_limit_line(line: &str) -> bool {
     if starts_with_prompt(line) || CLAUDE_REJECT.is_match(line) {
         return false;
     }
+
     CLAUDE_LIMIT.is_match(line)
 }
 
@@ -176,6 +185,7 @@ fn starts_with_prompt(line: &str) -> bool {
 fn has_reset_near(window: &[String], index: usize) -> bool {
     let first = index.saturating_sub(RESET_RANGE);
     let last = (index + RESET_RANGE).min(window.len().saturating_sub(1));
+
     window[first..=last]
         .iter()
         .any(|line| CLAUDE_RESET.is_match(line))
@@ -233,6 +243,7 @@ mod tests {
             "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.{FOOTER}"
         );
         assert!(claude(&screen));
+
         let screen = format!("You've reached your Fable limit.{FOOTER}");
         assert!(!claude(&screen));
     }
@@ -247,6 +258,7 @@ mod tests {
     fn ansi_noise_is_stripped_before_detection() {
         let raw = "\x1b[33m⚠ You've hit your session limit\x1b[0m\n\x1b[2m· resets \x1b]8;;https://claude.ai/upgrade\x1b\\6:40pm\x1b]8;;\x1b\\ (Asia/Calcutta)\x1b[0m\n\x1b[1m❯ \x1b[0m\n";
         let screen = strip_ansi(raw.as_bytes());
+
         assert!(claude(&screen));
     }
 
@@ -256,6 +268,7 @@ mod tests {
             "● Bash(grep 'resets 9am' notes.md)\n  ⎿  You've hit your usage limit · resets 9am\n\n● Nothing else to do.{FOOTER}"
         );
         assert!(!claude(&screen));
+
         let tail = content_tail(&screen, 12);
         assert_eq!(tail, vec!["● Nothing else to do.".to_owned()]);
     }
@@ -280,6 +293,7 @@ mod tests {
     fn chrome_footer_is_excluded_but_banner_detected() {
         let screen = "⚠ You've hit your session limit\n· resets 6:40pm (Asia/Calcutta)\n\n❯ \n⏵⏵ auto mode on (shift+tab to cycle)\n? for shortcuts\n";
         assert!(claude(screen));
+
         let tail = content_tail(screen, 12);
         assert_eq!(
             tail,
@@ -296,6 +310,7 @@ mod tests {
         let screen = format!("● Working on it.\n\n{busy}\n\n⏵⏵ auto mode on\n");
         let tail = content_tail(&screen, 12);
         assert_eq!(tail, vec!["● Working on it.".to_owned(), busy.to_owned()]);
+
         let spinner = "✻ Thinking… (esc to interrupt)";
         assert!(!is_chrome(spinner));
         assert!(is_chrome("✻ Crunched for 12s"));
@@ -350,6 +365,7 @@ mod tests {
     #[test]
     fn unrelated_screen_has_no_menu() {
         let screen = "● Done.\n\n❯ what do you want to do?\n⏵⏵ auto mode on\n";
+
         assert_eq!(rate_limit_menu(screen), MenuRead::NoMenu);
         assert_eq!(rate_limit_menu(""), MenuRead::NoMenu);
     }

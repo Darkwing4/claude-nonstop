@@ -12,6 +12,7 @@ pub fn alive(pid: u32) -> bool {
     let Some(pid) = Pid::from_raw(pid as i32) else {
         return false;
     };
+
     match rustix::process::test_kill_process(pid) {
         Ok(()) => true,
         Err(rustix::io::Errno::PERM) => true,
@@ -21,6 +22,7 @@ pub fn alive(pid: u32) -> bool {
 
 pub fn spawn_detached(command: &mut Command) -> io::Result<Child> {
     command.stdin(Stdio::null());
+
     unsafe {
         command.pre_exec(|| {
             rustix::process::setsid()
@@ -28,6 +30,7 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<Child> {
                 .map_err(io::Error::from)
         });
     }
+
     command.spawn()
 }
 
@@ -35,9 +38,11 @@ pub fn wait_timeout(child: &mut Child, timeout: Duration) -> io::Result<Option<E
     if let Some(status) = child.try_wait()? {
         return Ok(Some(status));
     }
+
     if timeout.is_zero() {
         return Ok(None);
     }
+
     let deadline = SystemTime::now().checked_add(timeout).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -45,6 +50,7 @@ pub fn wait_timeout(child: &mut Child, timeout: Duration) -> io::Result<Option<E
         )
     })?;
     let mut reactor = Reactor::new()?;
+
     let source = match reactor.watch_process(child.id()) {
         Ok(source) => source,
         Err(error) => {
@@ -54,9 +60,11 @@ pub fn wait_timeout(child: &mut Child, timeout: Duration) -> io::Result<Option<E
             };
         }
     };
+
     if let Some(status) = child.try_wait()? {
         return Ok(Some(status));
     }
+
     reactor.set_deadline(Some(deadline))?;
     loop {
         for wake in reactor.wait()? {
@@ -81,11 +89,13 @@ pub fn run_with_timeout(
     } else {
         Stdio::null()
     };
+
     command
         .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn()?;
+
     let input_written = match (child.stdin.take(), input) {
         (Some(mut pipe), Some(bytes)) => pipe.write_all(bytes),
         _ => Ok(()),
@@ -103,12 +113,14 @@ pub fn run_with_timeout(
         None => {
             child.kill()?;
             child.wait()?;
+
             CommandOutcome::TimedOut
         }
     };
 
     input_written
         .map_err(|error| io::Error::new(error.kind(), format!("stdin write failed: {error}")))?;
+
     Ok(outcome)
 }
 
@@ -164,6 +176,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+
         child.kill().unwrap();
         assert!(
             wait_timeout(&mut child, Duration::from_secs(5))
@@ -177,6 +190,7 @@ mod tests {
         let mut child = Command::new("sh").args(["-c", "exit 7"]).spawn().unwrap();
         let status = child.wait().unwrap();
         assert_eq!(status.code(), Some(7));
+
         assert_eq!(
             wait_timeout(&mut child, Duration::ZERO).unwrap(),
             Some(status)
@@ -196,6 +210,7 @@ mod tests {
             .unwrap();
         assert!(wait_timeout(&mut child, Duration::ZERO).unwrap().is_none());
         assert!(child.try_wait().unwrap().is_none());
+
         drop(child.stdin.take());
         assert!(
             wait_timeout(&mut child, Duration::from_secs(5))
@@ -212,6 +227,7 @@ mod tests {
             CommandOutcome::Finished { stdout, .. } => assert_eq!(stdout, "hi\n"),
             CommandOutcome::TimedOut => panic!("echo timed out"),
         }
+
         assert!(matches!(
             run_with_timeout(
                 Command::new("sleep").arg("5"),
@@ -230,6 +246,7 @@ mod tests {
             Duration::from_secs(5),
         );
         assert_eq!(stdout.unwrap(), "ok\n");
+
         let error = run_checked(
             Command::new("sh").args(["-c", "echo inactive; echo gone >&2; exit 3"]),
             Duration::from_secs(5),
@@ -239,6 +256,7 @@ mod tests {
             error.to_string(),
             "sh: -c echo inactive; echo gone >&2; exit 3 exited with exit status: 3: inactive gone"
         );
+
         let error =
             run_checked(Command::new("sleep").arg("5"), Duration::from_millis(50)).unwrap_err();
         assert_eq!(error.to_string(), "sleep: 5 timed out after 0s");
@@ -250,8 +268,10 @@ mod tests {
         let pid = child.id();
         let child_pid = Pid::from_raw(pid as i32).unwrap();
         let session = rustix::process::getsid(Some(child_pid));
+
         child.kill().unwrap();
         child.wait().unwrap();
+
         assert_eq!(session.unwrap(), child_pid);
         assert!(alive(std::process::id()));
         assert!(!alive(pid));

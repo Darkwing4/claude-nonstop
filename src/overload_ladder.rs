@@ -91,6 +91,7 @@ mod tests {
         let waits: Vec<u64> = (0..7)
             .map(|level| wait(&settings, level, 0.5).as_secs())
             .collect();
+
         assert_eq!(waits, vec![30, 60, 120, 240, 300, 300, 300]);
         assert_eq!(wait(&settings, 0, 0.0).as_secs_f64(), 25.5);
         assert_eq!(wait(&settings, 0, 1.0).as_secs_f64(), 34.5);

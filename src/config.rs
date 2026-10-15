@@ -233,6 +233,7 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
         .collect();
     if let Some(mut file_doc) = read_document(&paths.config_file)? {
         remove_retired_keys(&mut file_doc);
+
         for key in flat_keys(file_doc.as_table(), "") {
             if !sources.contains_key(&key) {
                 return Err(Error::Toml {
@@ -240,6 +241,7 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
                     detail: format!("unknown key {key}"),
                 });
             }
+
             let value = lookup(file_doc.as_table(), &key)
                 .and_then(Item::as_value)
                 .cloned();
@@ -249,6 +251,7 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
             }
         }
     }
+
     for (name, raw) in env_vars {
         let suffix = &name[ENV_PREFIX.len()..];
         if NON_CONFIG_ENV.contains(&suffix) || is_retired_env(suffix) {
@@ -265,14 +268,17 @@ pub fn load_from(paths: &Paths, env_vars: &[(String, String)]) -> Result<Loaded>
             .ok_or_else(|| Error::Invalid(format!("{name}: unknown configuration key")))?;
         let value = parse_env_value(raw, template)
             .map_err(|detail| Error::Invalid(format!("{name}: {detail}")))?;
+
         set_value(merged.as_table_mut(), &key, value);
         sources.insert(key, ValueSource::Env);
     }
+
     let config: Config = toml_edit::de::from_document(merged).map_err(|error| Error::Toml {
         path: paths.config_file.clone(),
         detail: error.to_string(),
     })?;
     validate(&config)?;
+
     Ok(Loaded { config, sources })
 }
 
@@ -283,15 +289,19 @@ pub fn set(paths: &Paths, key: &str, raw: &str) -> Result<()> {
         .ok_or_else(|| Error::Invalid(format!("unknown configuration key {key}")))?;
     let value = parse_env_value(raw, template)
         .map_err(|detail| Error::Invalid(format!("{key}: {detail}")))?;
+
     let mut doc = read_document(&paths.config_file)?.unwrap_or_default();
     remove_retired_keys(&mut doc);
     set_value(doc.as_table_mut(), key, value);
+
     let candidate: Config = toml_edit::de::from_document(doc.clone())
         .map_err(|error| Error::Invalid(format!("{key}: {error}")))?;
     validate(&candidate)?;
+
     if let Some(parent) = paths.config_file.parent() {
         crate::paths::create_private_dir(parent)?;
     }
+
     atomic_file::write(&paths.config_file, doc.to_string().as_bytes(), 0o600)
 }
 
@@ -299,11 +309,13 @@ pub fn get(loaded: &Loaded, key: &str) -> Result<String> {
     let doc = document_of(&loaded.config).map_err(|error| Error::Invalid(error.to_string()))?;
     let item = lookup(doc.as_table(), key)
         .ok_or_else(|| Error::Invalid(format!("unknown configuration key {key}")))?;
+
     Ok(render(item))
 }
 
 pub fn list(loaded: &Loaded) -> Result<Vec<(String, String, ValueSource)>> {
     let doc = document_of(&loaded.config).map_err(|error| Error::Invalid(error.to_string()))?;
+
     let mut rows = Vec::new();
     for key in flat_keys(doc.as_table(), "") {
         let item = lookup(doc.as_table(), &key)
@@ -313,8 +325,10 @@ pub fn list(loaded: &Loaded) -> Result<Vec<(String, String, ValueSource)>> {
             .get(&key)
             .copied()
             .unwrap_or(ValueSource::Default);
+
         rows.push((key, render(item), source));
     }
+
     Ok(rows)
 }
 
@@ -333,31 +347,37 @@ fn validate(config: &Config) -> Result<()> {
             "overload.message_contains must not contain empty strings".to_owned(),
         ));
     }
+
     if config.cutoff.max_in_a_row == 0 {
         return Err(Error::Invalid(
             "cutoff.max_in_a_row must be at least 1".to_owned(),
         ));
     }
+
     if config.overload.backoff_seconds.is_empty() || config.overload.backoff_seconds.contains(&0) {
         return Err(Error::Invalid(
             "overload.backoff_seconds must be a non-empty list of positive seconds".to_owned(),
         ));
     }
+
     if config.overload.jitter_percent > 100 {
         return Err(Error::Invalid(
             "overload.jitter_percent must be between 0 and 100".to_owned(),
         ));
     }
+
     if config.overload.max_total_minutes == 0 || config.overload.steady_seconds == 0 {
         return Err(Error::Invalid(
             "overload.steady_seconds and overload.max_total_minutes must be positive".to_owned(),
         ));
     }
+
     if config.limit.probe_minutes.is_empty() || config.limit.probe_minutes.contains(&0) {
         return Err(Error::Invalid(
             "limit.probe_minutes must be a non-empty list of positive minutes".to_owned(),
         ));
     }
+
     if config.limit.max_attempts == 0
         || config.limit.fallback_hours == 0
         || config.limit.verify_seconds == 0
@@ -367,6 +387,7 @@ fn validate(config: &Config) -> Result<()> {
                 .to_owned(),
         ));
     }
+
     let claude = &config.agents.claude;
     for (name, text) in [
         ("resume_message", &claude.resume_message),
@@ -378,6 +399,7 @@ fn validate(config: &Config) -> Result<()> {
                 "agents.claude.{name} must not be empty"
             )));
         }
+
         let lowered = text.to_ascii_lowercase();
         if let Some(word) = DETECTOR_WORDS.iter().find(|word| lowered.contains(*word)) {
             return Err(Error::Invalid(format!(
@@ -385,11 +407,13 @@ fn validate(config: &Config) -> Result<()> {
             )));
         }
     }
+
     if !config.notify.ntfy_topic.is_empty() && !config.notify.ntfy_server.starts_with("http") {
         return Err(Error::Invalid(
             "notify.ntfy_server must be an http(s) URL".to_owned(),
         ));
     }
+
     Ok(())
 }
 
@@ -406,6 +430,7 @@ fn read_document(path: &Path) -> Result<Option<DocumentMut>> {
         path: path.to_path_buf(),
         detail: error.to_string(),
     })?;
+
     Ok(Some(doc))
 }
 
@@ -431,6 +456,7 @@ fn defaults_document() -> Result<DocumentMut> {
 fn document_of(config: &Config) -> std::result::Result<DocumentMut, toml_edit::ser::Error> {
     let mut doc = toml_edit::ser::to_document(config)?;
     expand_inline_tables(doc.as_table_mut());
+
     Ok(doc)
 }
 
@@ -441,6 +467,7 @@ fn expand_inline_tables(table: &mut Table) {
             Some(Item::Value(Value::InlineTable(inline))) => Some(inline.clone().into_table()),
             _ => None,
         };
+
         if let Some(mut inner) = expanded {
             expand_inline_tables(&mut inner);
             table[&key] = Item::Table(inner);
@@ -458,11 +485,13 @@ fn flat_keys(table: &Table, prefix: &str) -> Vec<String> {
         } else {
             format!("{prefix}.{name}")
         };
+
         match item {
             Item::Table(inner) => keys.extend(flat_keys(inner, &key)),
             _ => keys.push(key),
         }
     }
+
     keys
 }
 
@@ -471,6 +500,7 @@ fn lookup<'a>(table: &'a Table, key: &str) -> Option<&'a Item> {
         Some(parts) => parts,
         None => return table.get(key),
     };
+
     match table.get(head)? {
         Item::Table(inner) => lookup(inner, rest),
         _ => None,
@@ -523,6 +553,7 @@ fn parse_env_value(raw: &str, template: &Value) -> std::result::Result<Value, St
                     items.push(part);
                 }
             }
+
             Ok(Value::Array(items))
         }
         Value::String(_) => Ok(Value::from(raw)),
@@ -547,6 +578,7 @@ mod tests {
         let config: Config =
             toml_edit::de::from_str("[overload]\nmessage_contains = ['pool exhausted']").unwrap();
         validate(&config).unwrap();
+
         assert!(config.overload.matches_message("POOL EXHAUSTED"));
         assert!(config.overload.matches_message(
             "only reserved subscriptions are left and their shared part is used up"
@@ -556,6 +588,7 @@ mod tests {
                 .overload
                 .matches_message("You've hit your usage limit")
         );
+
         let mut invalid = config;
         invalid.overload.message_contains.push("  ".to_owned());
         assert!(validate(&invalid).is_err());
@@ -565,6 +598,7 @@ mod tests {
     fn defaults_load_without_a_file() {
         let paths = Paths::temp("config-defaults");
         let loaded = load_from(&paths, &[]).unwrap();
+
         assert_eq!(loaded.config.cutoff.max_in_a_row, 3);
         assert!(
             loaded
@@ -576,6 +610,7 @@ mod tests {
             get(&loaded, "notify.ntfy_server").unwrap(),
             "https://ntfy.sh"
         );
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -587,6 +622,7 @@ mod tests {
             "[cutoff]\nmax_in_a_row = 4\n\n[notify]\nntfy_privacy = \"terse\"\n",
         )
         .unwrap();
+
         let env = vec![
             (
                 "CLAUDE_NONSTOP_CUTOFF_MAX_IN_A_ROW".to_owned(),
@@ -599,12 +635,14 @@ mod tests {
             ("CLAUDE_NONSTOP_ACTIVE".to_owned(), "1".to_owned()),
         ];
         let loaded = load_from(&paths, &env).unwrap();
+
         assert_eq!(loaded.config.cutoff.max_in_a_row, 7);
         assert_eq!(loaded.config.notify.ntfy_privacy, NtfyPrivacy::Terse);
         assert_eq!(loaded.config.overload.backoff_seconds, vec![10, 20]);
         assert_eq!(loaded.sources["cutoff.max_in_a_row"], ValueSource::Env);
         assert_eq!(loaded.sources["notify.ntfy_privacy"], ValueSource::File);
         assert_eq!(loaded.sources["limit.margin_seconds"], ValueSource::Default);
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -618,6 +656,7 @@ mod tests {
                 .to_string()
                 .contains("unknown key notify.chanel")
         );
+
         std::fs::write(&paths.config_file, "[cutoff]\nmax_in_a_row = 0\n").unwrap();
         assert!(
             load_from(&paths, &[])
@@ -625,6 +664,7 @@ mod tests {
                 .to_string()
                 .contains("max_in_a_row")
         );
+
         std::fs::remove_file(&paths.config_file).unwrap();
         let env = vec![(
             "CLAUDE_NONSTOP_CUTOFF_MAX_IN_A_ROW".to_owned(),
@@ -636,6 +676,7 @@ mod tests {
                 .to_string()
                 .contains("expected an integer")
         );
+
         let env = vec![("CLAUDE_NONSTOP_NOTIFY_LOUDNESS".to_owned(), "1".to_owned())];
         assert!(
             load_from(&paths, &env)
@@ -643,6 +684,7 @@ mod tests {
                 .to_string()
                 .contains("unknown configuration key")
         );
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -654,15 +696,18 @@ mod tests {
             "# my notes\n[general]\nauto_resume = true\n",
         )
         .unwrap();
+
         set(&paths, "notify.ntfy_privacy", "terse").unwrap();
         set(&paths, "agents.claude.enabled", "off").unwrap();
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.starts_with("# my notes\n"), "{text}");
         assert!(text.contains("ntfy_privacy = \"terse\""), "{text}");
         assert!(text.contains("[agents.claude]"), "{text}");
+
         let loaded = load_from(&paths, &[]).unwrap();
         assert_eq!(loaded.config.notify.ntfy_privacy, NtfyPrivacy::Terse);
         assert!(!loaded.config.agents.claude.enabled);
+
         let error = set(&paths, "agents.claude.overload_message", "please retry now").unwrap_err();
         assert!(error.to_string().contains("retry"), "{error}");
         assert!(
@@ -671,6 +716,7 @@ mod tests {
                 .to_string()
                 .contains("ntfy_privacy")
         );
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -681,10 +727,12 @@ mod tests {
         let env = vec![("CLAUDE_NONSTOP_NOTIFY_CHANNEL".to_owned(), "osc".to_owned())];
         let loaded = load_from(&paths, &env).unwrap();
         assert!(!loaded.sources.contains_key("notify.channel"));
+
         set(&paths, "notify.enabled", "off").unwrap();
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(!text.contains("channel"), "{text}");
         assert!(!load_from(&paths, &[]).unwrap().config.notify.enabled);
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -697,6 +745,7 @@ mod tests {
         )
         .unwrap();
         let rows = list(&loaded).unwrap();
+
         assert!(
             rows.iter()
                 .any(|(key, value, source)| key == "notify.enabled"
@@ -709,6 +758,7 @@ mod tests {
                     && value == "[30, 60, 120, 240, 300]")
         );
         assert_eq!(rows.len(), loaded.sources.len());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

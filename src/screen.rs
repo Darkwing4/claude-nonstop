@@ -24,15 +24,18 @@ pub fn strip_ansi(raw: &[u8]) -> String {
             i += 1;
             continue;
         }
+
         let Some(next) = raw.get(i + 1) else {
             break;
         };
+
         match next {
             b'[' => {
                 i += 2;
                 while i < raw.len() && (0x20..=0x3f).contains(&raw[i]) {
                     i += 1;
                 }
+
                 if i < raw.len() {
                     i += 1;
                 }
@@ -44,10 +47,12 @@ pub fn strip_ansi(raw: &[u8]) -> String {
                         i += 1;
                         break;
                     }
+
                     if raw[i] == 0x1b && raw.get(i + 1) == Some(&b'\\') {
                         i += 2;
                         break;
                     }
+
                     i += 1;
                 }
             }
@@ -55,6 +60,7 @@ pub fn strip_ansi(raw: &[u8]) -> String {
             _ => i += 2,
         }
     }
+
     String::from_utf8_lossy(&out).replace('\r', "")
 }
 
@@ -69,18 +75,22 @@ pub fn input_line(screen: &str, glyph: char) -> Option<String> {
         .enumerate()
         .rev()
         .find_map(|(index, line)| prompt_rest(line, glyph).map(|rest| (index, rest)))?;
+
     let mut parts = vec![first];
     for line in &lines[index + 1..] {
         if prompt_rest(line, glyph).is_some() {
             break;
         }
+
         let rest = BOX_CHARS.replace_all(line, "");
         let rest = rest.trim();
         if rest.is_empty() || is_footer(rest) {
             break;
         }
+
         parts.push(rest.to_owned());
     }
+
     Some(collapse(&parts.join(" ")))
 }
 
@@ -91,6 +101,7 @@ fn is_footer(line: &str) -> bool {
 fn prompt_rest(line: &str, glyph: char) -> Option<String> {
     let cleaned = BOX_CHARS.replace_all(line, "");
     let rest = cleaned.trim_start().strip_prefix(glyph)?;
+
     Some(rest.trim().to_owned())
 }
 
@@ -123,13 +134,16 @@ mod tests {
     fn input_line_is_read_from_the_prompt() {
         let screen = "● done\n────\n❯ continue please\n────\n⏵⏵ auto mode on\n";
         assert_eq!(input_line(screen, '❯'), Some("continue please".to_owned()));
+
         let eaten = "────\n│ ❯ ontinue please │\n────\n";
         assert_eq!(input_line(eaten, '❯'), Some("ontinue please".to_owned()));
+
         let wrapped = "❯ Continue where you\n  left off.\n\n⏵⏵ auto mode on\n";
         assert_eq!(
             input_line(wrapped, '❯'),
             Some("Continue where you left off.".to_owned())
         );
+
         assert_eq!(input_line("❯ \n", '❯'), Some(String::new()));
         assert_eq!(
             input_line("● done\n❯ \n⏵⏵ auto mode on\n", '❯'),

@@ -53,6 +53,7 @@ pub fn reopen(
     let session = record.session_id.as_deref();
     let settings = crate::recover::settings_for(config, record.agent);
     let mut argv = launch_argv(record.agent, session, &settings.resume_args);
+
     match target {
         Where::Headless => {
             argv.push(OsString::from(prompt));
@@ -60,6 +61,7 @@ pub fn reopen(
                 .session_id
                 .clone()
                 .unwrap_or_else(|| record.key.clone());
+
             spawn_detached_headless(paths, &name, &record.cwd, argv)
         }
         Where::Tmux | Where::Zellij => {
@@ -79,6 +81,7 @@ pub fn start_in_pane(
     let typing = Typing::new(&pane, agent);
     wait_for_prompt(typing.mux.as_ref(), &pane, typing.agent.prompt_glyph())?;
     typing.submit(prompt)?;
+
     Ok(pane)
 }
 
@@ -95,7 +98,9 @@ pub fn launch_argv(
         }
         (AgentId::Claude, None) => argv.push(OsString::from("-c")),
     }
+
     argv.extend(resume_args.iter().map(OsString::from));
+
     argv
 }
 
@@ -124,6 +129,7 @@ pub fn spawn_detached_headless(
     let err = out
         .try_clone()
         .map_err(|source| Error::io(&log_path, "open", source))?;
+
     let (program, rest) = argv
         .split_first()
         .ok_or_else(|| Error::Invalid("empty launch command".to_owned()))?;
@@ -133,12 +139,14 @@ pub fn spawn_detached_headless(
         .current_dir(cwd)
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
+
     for (env_name, _) in std::env::vars_os() {
         let text = env_name.to_string_lossy();
         if text.starts_with("ZELLIJ") || text.starts_with("TMUX") {
             command.env_remove(env_name);
         }
     }
+
     let child =
         spawn_detached(&mut command).map_err(|source| Error::io(program, "spawn", source))?;
     log::line(
@@ -149,6 +157,7 @@ pub fn spawn_detached_headless(
             log_path.display()
         ),
     );
+
     Ok(PaneAddress::Headless { pid: child.id() })
 }
 
@@ -160,12 +169,14 @@ fn wait_for_prompt(driver: &dyn mux::Multiplexer, pane: &PaneAddress, glyph: cha
         if screen::input_line(&text, glyph).is_some() && !screen::is_busy(&text) {
             return Ok(());
         }
+
         if started.elapsed() >= READY_LIMIT {
             return Err(Error::Invalid(format!(
                 "{pane} showed no prompt within {}s",
                 READY_LIMIT.as_secs()
             )));
         }
+
         std::thread::sleep(READY_STEP);
     }
 }
@@ -194,6 +205,7 @@ mod tests {
             .skip(claude.len() - 4)
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
+
         assert_eq!(tail, vec!["--resume", "abc", "--model", "opus"]);
         assert_eq!(
             launch_argv(AgentId::Claude, None, &[]).last().unwrap(),

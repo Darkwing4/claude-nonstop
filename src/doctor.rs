@@ -62,6 +62,7 @@ pub fn run(paths: &Paths, fix: bool) -> Result<Vec<Finding>> {
     findings.push(claude_version());
     findings.extend(hook(paths));
     findings.push(daemon_unit(paths));
+
     Ok(findings)
 }
 
@@ -75,6 +76,7 @@ pub fn worst(findings: &[Finding]) -> Severity {
 
 fn state_dir(paths: &Paths, fix: bool) -> Result<Finding> {
     let dir = &paths.state;
+
     if !dir.is_dir() {
         if fix {
             paths.ensure_state_dirs()?;
@@ -87,6 +89,7 @@ fn state_dir(paths: &Paths, fix: bool) -> Result<Finding> {
                 )
             });
         }
+
         return Ok(Finding::new(
             "state-dir",
             Severity::Warn,
@@ -94,6 +97,7 @@ fn state_dir(paths: &Paths, fix: bool) -> Result<Finding> {
         )
         .hint("created on first use or by doctor --fix"));
     }
+
     let mode = std::fs::metadata(dir)
         .map_err(|source| crate::error::Error::io(dir, "stat", source))?
         .permissions()
@@ -112,6 +116,7 @@ fn state_dir(paths: &Paths, fix: bool) -> Result<Finding> {
                 )
             });
         }
+
         return Ok(Finding::new(
             "state-dir",
             Severity::Warn,
@@ -122,6 +127,7 @@ fn state_dir(paths: &Paths, fix: bool) -> Result<Finding> {
         )
         .hint("doctor --fix"));
     }
+
     Ok(Finding::new(
         "state-dir",
         Severity::Info,
@@ -157,6 +163,7 @@ fn binary_on_path() -> Finding {
             "cannot resolve the running binary",
         );
     };
+
     let Some(found) = find_on_path("claude-nonstop") else {
         return Finding::new(
             "binary-path",
@@ -168,6 +175,7 @@ fn binary_on_path() -> Finding {
         )
         .hint("add its directory to PATH so the hook can find it");
     };
+
     if same_file(&found, &current) {
         Finding::new(
             "binary-path",
@@ -222,6 +230,7 @@ fn multiplexers() -> Vec<Finding> {
             "full screen dumps need zellij 0.35 or newer",
         ),
     ];
+
     let mut findings = Vec::new();
     for (program, version_flag, minimum, upgrade_hint) in probes {
         let Some(version) = version_of(program, &[version_flag]) else {
@@ -253,6 +262,7 @@ fn multiplexers() -> Vec<Finding> {
             .hint("install tmux or zellij for typing into a live pane"),
         );
     }
+
     findings
 }
 
@@ -265,6 +275,7 @@ fn claude_version() -> Finding {
         )
         .hint("install Claude Code first");
     };
+
     let Some(version) = parse_three(&output) else {
         return Finding::new(
             "claude-version",
@@ -272,8 +283,10 @@ fn claude_version() -> Finding {
             format!("cannot parse claude version from {output:?}"),
         );
     };
+
     let tested = TESTED_CLAUDE_VERSION;
     let label = format!("{}.{}.{}", version.0, version.1, version.2);
+
     if version > tested {
         Finding::new("claude-version", Severity::Warn, format!("claude {label} is newer than the tested {}.{}.{}", tested.0, tested.1, tested.2)).hint("hook and transcript formats are unverified for this version; watch the log for parse failures")
     } else {
@@ -309,6 +322,7 @@ fn hook(paths: &Paths) -> Vec<Finding> {
             .hint("set disableAllHooks to false"),
         );
     }
+
     let ours = install_hook::installed_commands(&settings);
     let current = std::env::current_exe().ok();
     match (ours.first(), current) {
@@ -332,6 +346,7 @@ fn hook(paths: &Paths) -> Vec<Finding> {
             "StopFailure hook installed",
         )),
     }
+
     for command in install_hook::stop_failure_commands(&settings) {
         if let Some(name) = COMPETING_HOOKS.iter().find(|name| command.contains(*name)) {
             findings.push(
@@ -344,6 +359,7 @@ fn hook(paths: &Paths) -> Vec<Finding> {
             );
         }
     }
+
     findings
 }
 
@@ -356,6 +372,7 @@ fn daemon_unit(paths: &Paths) -> Finding {
         )
         .hint("claude-nonstop install --daemon keeps waits alive across pane closes and reboots");
     }
+
     match crate::install_daemon::is_active() {
         Some(true) => Finding::new("daemon", Severity::Info, "daemon unit installed and active"),
         Some(false) => Finding::new(
@@ -394,6 +411,7 @@ fn parse_three(text: &str) -> Option<(u32, u32, u32)> {
     let major = parts.next().flatten()?;
     let minor = parts.next().flatten().unwrap_or(0);
     let patch = parts.next().flatten().unwrap_or(0);
+
     Some((major, minor, patch))
 }
 
@@ -434,6 +452,7 @@ mod tests {
             Finding::new("a", Severity::Info, "a"),
             Finding::new("b", Severity::Warn, "b"),
         ];
+
         assert_eq!(worst(&findings), Severity::Warn);
         assert_eq!(worst(&[]), Severity::Info);
     }

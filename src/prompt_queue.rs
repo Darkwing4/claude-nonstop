@@ -29,18 +29,21 @@ pub fn add(
     at: Option<u64>,
 ) -> Result<QueuedPrompt> {
     let prompt = sanitize(text)?;
+
     if !cwd.is_absolute() || !cwd.is_dir() {
         return Err(Error::Invalid(format!(
             "{} is not an existing absolute directory",
             cwd.display()
         )));
     }
+
     if !crate::recover::settings_for(config, agent).enabled {
         return Err(Error::Invalid(format!(
             "agent {} is disabled in the configuration",
             agent.name()
         )));
     }
+
     let entry = QueuedPrompt {
         id: format!("p-{}", &agent::claude::session_uuid()[..8]),
         agent,
@@ -63,6 +66,7 @@ pub fn add(
                 "the queue already holds {CAP} pending prompts"
             )));
         }
+
         let duplicate = book.prompts.iter().any(|item| {
             item.status == PromptStatus::Pending
                 && item.cwd == entry.cwd
@@ -74,9 +78,11 @@ pub fn add(
                 "an identical prompt is already pending for that directory".to_owned(),
             ));
         }
+
         book.prompts.push(entry.clone());
         Ok(entry.clone())
     })??;
+
     log::line(
         "",
         format!(
@@ -87,7 +93,9 @@ pub fn add(
             when
         ),
     );
+
     crate::resumer::spawn_if_needed(paths)?;
+
     Ok(stored)
 }
 
@@ -102,6 +110,7 @@ pub fn remove(paths: &Paths, id: &str) -> Result<bool> {
                 found = true;
             }
         }
+
         found
     })
 }
@@ -115,6 +124,7 @@ pub fn clear(paths: &Paths) -> Result<usize> {
                 count += 1;
             }
         }
+
         count
     })
 }
@@ -129,11 +139,13 @@ pub fn sanitize(text: &str) -> Result<String> {
     if trimmed.is_empty() {
         return Err(Error::Invalid("the prompt is empty".to_owned()));
     }
+
     if trimmed.chars().count() > MAX_LENGTH {
         return Err(Error::Invalid(format!(
             "the prompt is longer than {MAX_LENGTH} characters"
         )));
     }
+
     Ok(trimmed.to_owned())
 }
 
@@ -173,12 +185,15 @@ pub fn pass(
             _ => {}
         }
     }
+
     prune(paths, now)?;
+
     Ok(next)
 }
 
 fn due_at(book: &ledger::Ledger, item: &QueuedPrompt) -> Option<u64> {
     let gate = item.not_before.unwrap_or(0);
+
     let base = match item.when {
         PromptWhen::Now => Some(item.created_at),
         PromptWhen::At => item.at,
@@ -195,6 +210,7 @@ fn due_at(book: &ledger::Ledger, item: &QueuedPrompt) -> Option<u64> {
             Some(waiting.map_or(item.created_at, |reset| reset.max(item.created_at)))
         }
     };
+
     base.map(|at| at.max(gate))
 }
 
@@ -212,14 +228,18 @@ fn launch(
             }) else {
                 return false;
             };
+
             current.status = PromptStatus::Launching;
             current.launched_at = Some(now);
             current.attempts += 1;
+
             true
         })?;
+
     if !claimed {
         return Ok(());
     }
+
     match start_session(paths, config, item) {
         Ok(pane) => {
             update_prompt(paths, &item.id, |current| {
@@ -230,12 +250,14 @@ fn launch(
                 item.id.clone(),
                 now_unix() + u64::from(config.limit.verify_seconds),
             );
+
             log::line("", format!("prompt {} started in {pane}", item.id));
         }
         Err(error) => {
             fail_attempt(paths, config, item, error.to_string())?;
         }
     }
+
     Ok(())
 }
 
@@ -244,6 +266,7 @@ fn start_session(paths: &Paths, config: &Config, item: &QueuedPrompt) -> Result<
     let mut argv = vec![OsString::from(item.agent.name())];
     argv.extend(settings.launch_args.iter().map(OsString::from));
     let target = reopen::choose(config);
+
     match target {
         reopen::Where::Headless => {
             match item.agent {
@@ -252,6 +275,7 @@ fn start_session(paths: &Paths, config: &Config, item: &QueuedPrompt) -> Result<
                     argv.push(OsString::from(&item.prompt));
                 }
             }
+
             reopen::spawn_detached_headless(paths, &item.id, &item.cwd, argv)
         }
         reopen::Where::Tmux | reopen::Where::Zellij => {
@@ -267,6 +291,7 @@ fn verify_delivery(
     verify_at: &mut BTreeMap<String, u64>,
 ) -> Result<()> {
     verify_at.remove(&item.id);
+
     let limited = match &item.pane {
         Some(pane) if !pane.is_headless() => {
             let driver = mux::for_pane(pane);
@@ -282,6 +307,7 @@ fn verify_delivery(
         }
         _ => false,
     };
+
     if limited {
         return fail_attempt(
             paths,
@@ -290,10 +316,12 @@ fn verify_delivery(
             "hit a usage limit right after starting".to_owned(),
         );
     }
+
     update_prompt(paths, &item.id, |current| {
         current.status = PromptStatus::Delivered;
         current.delivered_at = Some(now_unix());
     })?;
+
     let outcome = notify::send(
         &config.notify,
         "claude-nonstop: prompt started",
@@ -309,6 +337,7 @@ fn verify_delivery(
         false,
     );
     log::line("", format!("prompt {} delivered ({outcome})", item.id));
+
     Ok(())
 }
 
@@ -325,6 +354,7 @@ fn fail_attempt(paths: &Paths, config: &Config, item: &QueuedPrompt, reason: Str
             current.pane = None;
         }
     })?;
+
     if exhausted {
         let outcome = notify::send(
             &config.notify,
@@ -350,6 +380,7 @@ fn fail_attempt(paths: &Paths, config: &Config, item: &QueuedPrompt, reason: Str
             ),
         );
     }
+
     Ok(())
 }
 
@@ -361,6 +392,7 @@ fn reclaim(paths: &Paths, item: &QueuedPrompt, reason: &str) -> Result<()> {
         }
     })?;
     log::line("", format!("prompt {} back to pending: {reason}", item.id));
+
     Ok(())
 }
 
@@ -393,10 +425,12 @@ fn prune(paths: &Paths, now: u64) -> Result<()> {
                 > now
         }
     };
+
     let book = ledger::read(paths)?;
     if book.prompts.iter().all(keep_prompt) && book.sessions.values().all(keep_session) {
         return Ok(());
     }
+
     ledger::update(paths, |book| {
         book.prompts.retain(keep_prompt);
         book.sessions.retain(|_, record| keep_session(record));
@@ -432,8 +466,10 @@ mod tests {
         let paths = Paths::temp("prompt-queue-prune");
         paths.ensure_state_dirs().unwrap();
         let now = PRUNE_AFTER + 100;
+
         prune(&paths, now).unwrap();
         assert!(!paths.ledger().exists());
+
         ledger::update(&paths, |book| {
             for (id, status, at) in [
                 ("active", PromptStatus::Pending, 0),
@@ -448,6 +484,7 @@ mod tests {
                     ..QueuedPrompt::default()
                 });
             }
+
             for (id, status, at) in [
                 ("active", Status::Stopped, 0),
                 ("resuming", Status::Resuming, 0),
@@ -466,6 +503,7 @@ mod tests {
             }
         })
         .unwrap();
+
         let before = ledger::read(&paths).unwrap().seq;
         prune(&paths, now).unwrap();
         let book = ledger::read(&paths).unwrap();
@@ -474,6 +512,7 @@ mod tests {
         assert!(!book.prompts.iter().any(|item| item.id == "expired"));
         assert_eq!(book.sessions.len(), 3);
         assert!(!book.sessions.contains_key("expired"));
+
         let bytes = std::fs::read(paths.ledger()).unwrap();
         let modified = std::fs::metadata(paths.ledger())
             .unwrap()
@@ -482,6 +521,7 @@ mod tests {
         for _ in 0..10 {
             prune(&paths, now).unwrap();
         }
+
         assert_eq!(std::fs::read(paths.ledger()).unwrap(), bytes);
         assert_eq!(
             std::fs::metadata(paths.ledger())
@@ -490,6 +530,7 @@ mod tests {
                 .unwrap(),
             modified
         );
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -514,6 +555,7 @@ mod tests {
             ..QueuedPrompt::default()
         };
         assert_eq!(due_at(&book, &item), Some(100));
+
         book.sessions.insert(
             "a".into(),
             ledger::SessionRecord {
@@ -535,11 +577,13 @@ mod tests {
             },
         );
         assert_eq!(due_at(&book, &item), Some(500));
+
         let gated = QueuedPrompt {
             not_before: Some(700),
             ..item.clone()
         };
         assert_eq!(due_at(&book, &gated), Some(700));
+
         let at = QueuedPrompt {
             when: PromptWhen::At,
             at: Some(300),

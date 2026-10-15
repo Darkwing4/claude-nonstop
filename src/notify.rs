@@ -35,6 +35,7 @@ fn native(title: &str, body: &str, urgent: bool) -> String {
         );
         let mut command = Command::new("osascript");
         command.arg("-e").arg(script);
+
         command
     } else {
         let mut command = Command::new("notify-send");
@@ -45,8 +46,10 @@ fn native(title: &str, body: &str, urgent: bool) -> String {
             .arg(if urgent { "critical" } else { "normal" })
             .arg(title)
             .arg(body);
+
         command
     };
+
     describe_outcome(run_with_timeout(&mut command, None, SEND_TIMEOUT))
 }
 
@@ -54,6 +57,7 @@ fn ntfy(settings: &Notify, title: &str, body: &str, urgent: bool) -> String {
     let message = ntfy_message(body, settings.ntfy_privacy);
     let payload = ntfy_payload(&settings.ntfy_topic, title, &message, urgent);
     let server = format!("{}/", settings.ntfy_server.trim_end_matches('/'));
+
     let mut command = Command::new("curl");
     command
         .arg("--fail")
@@ -63,13 +67,16 @@ fn ntfy(settings: &Notify, title: &str, body: &str, urgent: bool) -> String {
         .arg("5")
         .arg("-H")
         .arg("Content-Type: application/json");
+
     if !settings.ntfy_token.is_empty() {
         command
             .arg("-H")
             .arg(format!("Authorization: Bearer {}", settings.ntfy_token));
     }
+
     command.arg("--data").arg("@-").arg(server);
     let outcome = run_with_timeout(&mut command, Some(payload.as_bytes()), NTFY_TIMEOUT);
+
     describe_outcome(outcome)
 }
 
@@ -107,6 +114,7 @@ fn sanitize(text: &str, limit: usize) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+
     collapsed.chars().take(limit).collect()
 }
 
@@ -142,9 +150,11 @@ mod tests {
             ));
             fs::create_dir_all(&dir).unwrap();
             let saved_path = std::env::var("PATH").unwrap_or_default();
+
             unsafe {
                 std::env::set_var("PATH", format!("{}:{saved_path}", dir.display()));
             }
+
             FakeBin {
                 dir,
                 saved_path,
@@ -164,6 +174,7 @@ mod tests {
             unsafe {
                 std::env::set_var("PATH", &self.saved_path);
             }
+
             fs::remove_dir_all(&self.dir).unwrap();
         }
     }
@@ -210,6 +221,7 @@ mod tests {
             dir = fake.dir.display()
         );
         fake.install("curl", &script);
+
         let settings = Notify {
             ntfy_topic: "alerts".to_owned(),
             ntfy_server: "https://ntfy.example/".to_owned(),
@@ -217,7 +229,9 @@ mod tests {
             ntfy_privacy: NtfyPrivacy::Terse,
             ..Notify::default()
         };
+
         let outcome = ntfy(&settings, "T", "secret", true);
+
         let stdin = fs::read_to_string(fake.dir.join("stdin")).unwrap();
         let args = fs::read_to_string(fake.dir.join("args")).unwrap();
         assert_eq!(outcome, "delivered");

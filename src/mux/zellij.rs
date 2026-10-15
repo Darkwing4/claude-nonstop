@@ -36,6 +36,7 @@ impl Zellij {
             .arg(session)
             .arg("action")
             .args(args);
+
         run_checked(&mut command, ACTION_TIMEOUT)
     }
 
@@ -59,6 +60,7 @@ impl Zellij {
         let rows: Vec<PaneRow> = serde_json::from_str(&listing).map_err(|error| {
             Error::command("zellij", format!("list-panes output is not JSON: {error}"))
         })?;
+
         Ok(rows
             .into_iter()
             .find(|row| row.id == *pane_id && !row.is_plugin))
@@ -71,6 +73,7 @@ impl Zellij {
         command.arg("list-sessions").arg(flag);
         let outcome = run_with_timeout(&mut command, None, ACTION_TIMEOUT)
             .map_err(|source| Error::command("zellij", source.to_string()))?;
+
         match outcome {
             CommandOutcome::Finished { stdout, .. } => Ok(stdout),
             CommandOutcome::TimedOut => Err(Error::command("zellij", "list-sessions timed out")),
@@ -99,6 +102,7 @@ impl Zellij {
             command.arg("attach").arg("-b").arg("-c").arg(session);
             run_checked(&mut command, ACTION_TIMEOUT)?;
         }
+
         let mut command = zellij_command();
         command
             .arg("--session")
@@ -109,6 +113,7 @@ impl Zellij {
             .arg(cwd)
             .arg("--")
             .args(argv);
+
         let stdout = run_checked(&mut command, ACTION_TIMEOUT)?;
         let pane_id = stdout
             .trim()
@@ -120,6 +125,7 @@ impl Zellij {
                     format!("run did not report a pane id: {stdout:?}"),
                 )
             })?;
+
         Ok(PaneAddress::Zellij {
             session: session.to_owned(),
             pane_id,
@@ -142,6 +148,7 @@ impl Multiplexer for Zellij {
         if full {
             args.push("--full");
         }
+
         Self::action(session, &args)
     }
 
@@ -152,13 +159,16 @@ impl Multiplexer for Zellij {
 
     fn send_key(&self, pane: &PaneAddress, key: Key) -> Result<()> {
         let (session, pane_id) = Self::parts(pane)?;
+
         let bytes: &[&str] = match key {
             Key::Enter => &["13"],
             Key::Up => &["27", "91", "65"],
             Key::Down => &["27", "91", "66"],
         };
+
         let mut args = vec!["write", "--pane-id", &pane_id];
         args.extend_from_slice(bytes);
+
         Self::action(session, &args).map(|_| ())
     }
 }
@@ -170,6 +180,7 @@ fn zellij_command() -> Command {
             command.env_remove(name);
         }
     }
+
     command
 }
 

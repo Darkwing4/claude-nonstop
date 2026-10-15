@@ -45,6 +45,7 @@ impl Context<'_> {
 
     pub fn stream_cut(&self, error: &str) -> Result<()> {
         let reason = format!("turn cut off ({error})");
+
         if self.pane.is_headless() {
             log::line(
                 self.session_id,
@@ -77,9 +78,11 @@ impl Context<'_> {
                         "{reason}: {count} resumes in a row without progress, giving up ({outcome})"
                     ),
                 );
+
                 return Ok(());
             }
         };
+
         let message = &settings_for(self.config, self.agent).cutoff_message;
         let typing = Typing::new(self.pane, self.agent);
         if let Err(error) = typing.submit(message) {
@@ -89,7 +92,9 @@ impl Context<'_> {
             );
             return Ok(());
         }
+
         continue_counter::record(self.paths, self.session_id, self.transcript, next)?;
+
         let name = self.display_name();
         let outcome = notify::send(
             &self.config.notify,
@@ -104,6 +109,7 @@ impl Context<'_> {
                 self.pane
             ),
         );
+
         Ok(())
     }
 }
@@ -128,10 +134,12 @@ pub fn resolve_limit(config: &Config, latest: &LimitRecord) -> (u64, ResetSource
         margin,
         probe,
     );
+
     let mut at = resolved.at;
     if latest.kind == LimitType::FiveHour && resolved.source == ResetSource::Absolute {
         at = reset_time::stale_five_hour_clamp(at, banner.unwrap_or(now), margin);
     }
+
     (u64::try_from(at.as_second()).unwrap_or(0), resolved.source)
 }
 
@@ -146,11 +154,13 @@ pub fn record_limit(
 ) -> Result<()> {
     let agent = AgentId::Claude;
     let now = now_unix();
+
     let latest = match transcript.filter(|path| path.is_file()) {
         Some(path) => transcript_claude::latest_limit_record(path, &config.overload)
             .map_err(|source| crate::error::Error::io(path, "read", source))?,
         None => None,
     };
+
     let (reset_at, reset_source, kind, banner_at) = match &latest {
         Some(record) => {
             let (at, source) = resolve_limit(config, record);
@@ -163,6 +173,7 @@ pub fn record_limit(
             None,
         ),
     };
+
     ledger::update(paths, |ledger| {
         let record = ledger
             .sessions
@@ -171,6 +182,7 @@ pub fn record_limit(
                 key: session_id.to_owned(),
                 ..SessionRecord::default()
             });
+
         let same_episode = record.is_open()
             && record.stop == StopKind::UsageLimit
             && banner_at.unwrap_or(now).abs_diff(record.episode_at()) <= EPISODE_WINDOW;
@@ -178,17 +190,21 @@ pub fn record_limit(
             if pane.is_some() {
                 record.pane = pane.cloned();
             }
+
             let better = reset_source > record.reset_source
                 || (reset_source == record.reset_source && reset_at < record.reset_at);
             if better {
                 record.reset_at = reset_at;
                 record.reset_source = reset_source;
             }
+
             if record.limit == LimitType::Unknown {
                 record.limit = kind;
             }
+
             return;
         }
+
         *record = SessionRecord {
             key: session_id.to_owned(),
             agent,
@@ -206,6 +222,7 @@ pub fn record_limit(
             ..SessionRecord::default()
         };
     })?;
+
     if let Some(pane) = pane {
         if config.general.menu_auto_answer && !pane.is_headless() {
             let typing = Typing::new(pane, agent);
@@ -214,6 +231,7 @@ pub fn record_limit(
             }
         }
     }
+
     let name = crate::resumer::display_name(paths, session_id, pane, cwd);
     let body = if reset_source == ResetSource::Fallback {
         format!(
@@ -227,6 +245,7 @@ pub fn record_limit(
             human_wait(reset_at.saturating_sub(now))
         )
     };
+
     let outcome = notify::send(&config.notify, "claude-nonstop: limit", &body, false);
     log::line(
         session_id,
@@ -237,6 +256,7 @@ pub fn record_limit(
             reset_source
         ),
     );
+
     crate::resumer::spawn_if_needed(paths)
 }
 
@@ -250,6 +270,7 @@ pub struct OverloadReport<'a> {
 
 pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport) -> Result<()> {
     let session_id = report.session_id;
+
     if session_id.is_empty() {
         log::line(
             "",
@@ -262,6 +283,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
     }
 
     let current = ledger::read(paths)?.sessions.get(session_id).cloned();
+
     if let Some(record) = current
         .as_ref()
         .filter(|record| record.is_open() && record.stop == StopKind::UsageLimit)
@@ -284,6 +306,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
             sent: record.attempts,
             last_sent_at: record.last_attempt_at,
         });
+
     let progressed = match &previous {
         Some(episode) if report.transcript.is_file() => transcript_claude::progressed_after(
             report.transcript,
@@ -292,6 +315,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
         .map_err(|source| crate::error::Error::io(report.transcript, "read", source))?,
         _ => false,
     };
+
     let now = now_unix();
     let step = overload_ladder::next_step(
         &config.overload,
@@ -304,6 +328,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
     match step {
         Step::GiveUp { episode } => {
             write_overload(paths, report, &episode, Status::Failed, now)?;
+
             let name =
                 crate::claude_sessions::display_name(paths, session_id, &report.pane.to_string());
             let outcome = notify::send(
@@ -322,6 +347,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
                     report.error, config.overload.max_total_minutes
                 ),
             );
+
             Ok(())
         }
         Step::Wait { episode, wait } => {
@@ -337,6 +363,7 @@ pub fn schedule_overload(paths: &Paths, config: &Config, report: &OverloadReport
                     now.saturating_sub(episode.started_at) as f64 / 60.0
                 ),
             );
+
             crate::resumer::spawn_if_needed(paths)
         }
     }
@@ -374,6 +401,7 @@ fn write_overload(
 pub fn answer_menu(typing: &Typing, session_id: &str) -> Result<()> {
     let visible = typing.mux.capture(typing.pane, false)?;
     let text = crate::screen::strip_ansi(visible.as_bytes());
+
     match limit_detect::rate_limit_menu(&text) {
         MenuRead::NoMenu => Ok(()),
         MenuRead::Unreadable => {
@@ -389,15 +417,18 @@ pub fn answer_menu(typing: &Typing, session_id: &str) -> Result<()> {
             } else {
                 crate::mux::Key::Down
             };
+
             for _ in 0..steps.unsigned_abs() {
                 typing.press(key)?;
                 std::thread::sleep(MENU_STEP_GAP);
             }
+
             typing.press(crate::mux::Key::Enter)?;
             log::line(
                 session_id,
                 format!("rate limit menu answered with stop and wait ({steps} steps)"),
             );
+
             Ok(())
         }
     }
@@ -406,6 +437,7 @@ pub fn answer_menu(typing: &Typing, session_id: &str) -> Result<()> {
 pub fn human_wait(seconds: u64) -> String {
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;
+
     if hours > 0 {
         format!("{hours}h {minutes}m")
     } else {

@@ -26,6 +26,7 @@ pub fn install(paths: &Paths, requested: Option<u8>) -> Result<Vec<String>> {
     env_object(&mut settings, &settings_path)?
         .insert(MAX_RETRIES_ENV.to_owned(), Value::String(wanted.clone()));
     write_settings(&settings_path, &settings, existed)?;
+
     Ok(vec![format!(
         "{MAX_RETRIES_ENV}={wanted} in {}",
         settings_path.display()
@@ -41,10 +42,13 @@ pub fn uninstall(paths: &Paths) -> Result<Vec<String>> {
 
     let env = env_object(&mut settings, &settings_path)?;
     env.remove(MAX_RETRIES_ENV);
+
     if env.is_empty() {
         settings.remove("env");
     }
+
     write_settings(&settings_path, &settings, true)?;
+
     Ok(vec![format!(
         "{MAX_RETRIES_ENV} removed from {}",
         settings_path.display()
@@ -110,6 +114,7 @@ mod tests {
 
         uninstall(&paths).unwrap();
         assert_eq!(env_of(&paths), Some(json!({ "OTHER": "x" })));
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -121,6 +126,7 @@ mod tests {
 
         let (settings, _) = read_settings(&paths.claude_settings()).unwrap();
         assert!(settings.get("env").is_none());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 
@@ -134,6 +140,7 @@ mod tests {
             std::fs::read_to_string(paths.claude_settings()).unwrap(),
             r#"{"env":"oops"}"#
         );
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

@@ -52,6 +52,7 @@ pub fn classify(
         if message.is_some_and(|text| NOT_RETRYABLE.is_match(text)) {
             return HookKind::NotRetryable;
         }
+
         if message.is_some_and(|text| overload.matches_message(text)) {
             return HookKind::Overloaded;
         }
@@ -78,6 +79,7 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
         log::line("", format!("hook: stdin unreadable: {error}"));
         return Ok(0);
     }
+
     let payload: Payload = match serde_json::from_str(&raw) {
         Ok(payload) => payload,
         Err(error) => {
@@ -103,19 +105,23 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
         payload.last_assistant_message.as_deref(),
         &config.overload,
     );
+
     let Some(pane) = PaneAddress::from_env(&std::env::vars().collect()) else {
         log::line(
             &session_id,
             format!("hook: {error} outside any pane, nothing to type into"),
         );
+
         if kind == HookKind::RateLimit {
             record_limit(paths, config, &payload, &session_id, None)?;
         }
+
         return Ok(0);
     };
 
     let transcript = payload.transcript_path.clone().unwrap_or_default();
     let cwd = payload.cwd.clone().unwrap_or_default();
+
     match kind {
         HookKind::StreamCut => {
             if !transcript.is_file() {
@@ -128,6 +134,7 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
                 );
                 return Ok(0);
             }
+
             let context = recover::Context {
                 paths,
                 config,
@@ -154,6 +161,7 @@ pub fn run(paths: &Paths, config: &Config, input: &mut dyn Read) -> Result<i32> 
             format!("hook: {error} is not something a retry fixes, leaving it to the user"),
         ),
     }
+
     Ok(0)
 }
 
@@ -169,7 +177,9 @@ fn record_limit(
             "hook: rate_limit without a session id".to_owned(),
         ));
     }
+
     let cwd = payload.cwd.clone().unwrap_or_default();
+
     recover::record_limit(
         paths,
         config,
@@ -195,10 +205,12 @@ mod tests {
         for error in ["rate_limit", "unknown", "server_error", "overloaded"] {
             assert_eq!(classify(error, Some(message)), HookKind::Overloaded);
         }
+
         let mut overload = crate::config::Overload::default();
         overload
             .message_contains
             .push("upstream pool exhausted".to_owned());
+
         assert_eq!(
             super::classify("rate_limit", Some("UPSTREAM POOL EXHAUSTED"), &overload),
             HookKind::Overloaded
@@ -259,14 +271,18 @@ mod tests {
     fn other_events_and_subagents_are_ignored() {
         let paths = Paths::temp("hook-run");
         let config = Config::default();
+
         let mut stop = r#"{"hook_event_name":"Stop","error":"server_error"}"#.as_bytes();
         assert_eq!(run(&paths, &config, &mut stop).unwrap(), 0);
+
         let mut sub = r#"{"hook_event_name":"StopFailure","error":"server_error","agent_id":"a1"}"#
             .as_bytes();
         assert_eq!(run(&paths, &config, &mut sub).unwrap(), 0);
+
         let mut broken = "{".as_bytes();
         assert_eq!(run(&paths, &config, &mut broken).unwrap(), 0);
         assert!(!paths.state.exists());
+
         std::fs::remove_dir_all(&paths.home).unwrap();
     }
 }

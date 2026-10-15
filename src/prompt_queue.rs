@@ -294,7 +294,7 @@ fn verify_delivery(
             match driver.capture(pane, false) {
                 Ok(visible) => {
                     let text = screen::strip_ansi(visible.as_bytes());
-                    crate::limit_detect::find_limit(&text, item.agent).is_some()
+                    crate::limit_detect::find_limit(&text, item.agent)
                         || crate::limit_detect::rate_limit_menu(&text)
                             != crate::limit_detect::MenuRead::NoMenu
                 }
